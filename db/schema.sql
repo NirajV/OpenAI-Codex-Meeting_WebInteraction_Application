@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS meeting_schedules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   meeting_id INTEGER NOT NULL UNIQUE,
   starts_at TEXT NOT NULL,
+  start_time TEXT,
+  end_time TEXT,
   timezone TEXT NOT NULL DEFAULT 'UTC',
   schedule_type TEXT NOT NULL CHECK (schedule_type IN ('one-time', 'recurring')),
   recurrence_rule TEXT,
