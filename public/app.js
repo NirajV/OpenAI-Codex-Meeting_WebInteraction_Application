@@ -57,7 +57,8 @@ const refreshMeetings = async () => {
   meetingList.innerHTML = meetings
     .map(
       (meeting) =>
-        `<li><strong>${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt} (${meeting.timezone})` +
+        `<li><strong>${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt}` +
+        `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
         `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
         `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
         `<br/>Invitees: ${meeting.invitees || 'None'}</li>`
@@ -111,6 +112,8 @@ meetingForm.addEventListener('submit', async (event) => {
   const payload = {
     name: document.getElementById('meetingName').value,
     startsAt: document.getElementById('startsAt').value,
+    startTime: document.getElementById('startTime').value,
+    endTime: document.getElementById('endTime').value,
     timezone: document.getElementById('timezone').value,
     scheduleType: scheduleType.value,
     recurrenceRule: document.getElementById('recurrenceRule').value || null,

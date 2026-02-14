@@ -25,6 +25,12 @@ def initialize_db():
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with get_db_connection() as conn:
         conn.executescript(schema_sql)
+        schedule_columns = {row[1] for row in conn.execute("PRAGMA table_info(meeting_schedules)").fetchall()}
+        if "start_time" not in schedule_columns:
+            conn.execute("ALTER TABLE meeting_schedules ADD COLUMN start_time TEXT")
+        if "end_time" not in schedule_columns:
+            conn.execute("ALTER TABLE meeting_schedules ADD COLUMN end_time TEXT")
+        conn.commit()
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -88,6 +94,8 @@ class AppHandler(BaseHTTPRequestHandler):
             query = """
                 SELECT me.id, me.name,
                        ms.starts_at AS startsAt,
+                       ms.start_time AS startTime,
+                       ms.end_time AS endTime,
                        ms.timezone,
                        ms.schedule_type AS scheduleType,
                        ms.recurrence_rule AS recurrenceRule,
@@ -149,14 +157,16 @@ class AppHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/meetings":
                 name = (data.get("name") or "").strip()
                 starts_at = data.get("startsAt")
+                start_time = data.get("startTime")
+                end_time = data.get("endTime")
                 timezone = (data.get("timezone") or "UTC").strip()
                 schedule_type = data.get("scheduleType")
                 recurrence_rule = (data.get("recurrenceRule") or "").strip() or None
                 recurrence_end = data.get("recurrenceEndDate") or None
                 invitee_ids = data.get("inviteeIds") or []
 
-                if not name or not starts_at or not schedule_type:
-                    self._send_json({"error": "Meeting name, start time and schedule type are required."}, 400)
+                if not name or not starts_at or not schedule_type or not start_time or not end_time:
+                    self._send_json({"error": "Meeting name, start date/time, start time, end time and schedule type are required."}, 400)
                     return
                 if schedule_type not in ["one-time", "recurring"]:
                     self._send_json({"error": "Schedule type must be one-time or recurring."}, 400)
@@ -166,6 +176,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     return
 
                 datetime.fromisoformat(starts_at)
+                parsed_start_time = datetime.strptime(start_time, "%H:%M")
+                parsed_end_time = datetime.strptime(end_time, "%H:%M")
+                if parsed_end_time <= parsed_start_time:
+                    self._send_json({"error": "Meeting end time must be after start time."}, 400)
+                    return
 
                 with get_db_connection() as conn:
                     cursor = conn.execute("INSERT INTO meetings (name) VALUES (?)", (name,))
@@ -173,12 +188,14 @@ class AppHandler(BaseHTTPRequestHandler):
                     conn.execute(
                         """
                         INSERT INTO meeting_schedules
-                        (meeting_id, starts_at, timezone, schedule_type, recurrence_rule, recurrence_end_date)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        (meeting_id, starts_at, start_time, end_time, timezone, schedule_type, recurrence_rule, recurrence_end_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             meeting_id,
                             starts_at,
+                            start_time,
+                            end_time,
                             timezone,
                             schedule_type,
                             recurrence_rule if schedule_type == "recurring" else None,
