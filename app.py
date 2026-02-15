@@ -10,7 +10,8 @@ BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 DB_DIR = BASE_DIR / "db"
 SCHEMA_PATH = DB_DIR / "schema.sql"
-DB_PATH = DB_DIR / "meetings.db"
+LEGACY_DB_PATH = DB_DIR / "meetings.db"
+DB_PATH = Path(os.environ.get("DB_PATH", DB_DIR / "general_meetings_db.db")).resolve()
 
 
 def get_db_connection():
@@ -22,6 +23,9 @@ def get_db_connection():
 
 def initialize_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
+    if not DB_PATH.exists() and LEGACY_DB_PATH.exists() and DB_PATH != LEGACY_DB_PATH.resolve():
+        DB_PATH.write_bytes(LEGACY_DB_PATH.read_bytes())
+
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn = get_db_connection()
     try:
