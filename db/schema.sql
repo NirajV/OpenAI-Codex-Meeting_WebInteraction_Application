@@ -20,15 +20,8 @@ CREATE TABLE IF NOT EXISTS team_members (
   FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS meetings (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  organizer_note TEXT,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS meeting_patient_details (
-  meeting_id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   medical_record_number VARCHAR(128) NOT NULL,
   patient_name VARCHAR(255) NOT NULL,
   patient_date_of_birth DATE NOT NULL,
@@ -36,8 +29,16 @@ CREATE TABLE IF NOT EXISTS meeting_patient_details (
   doctor_name VARCHAR(255) NOT NULL,
   department_name VARCHAR(255) NOT NULL,
   meeting_agenda_note TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS meetings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  organizer_note TEXT,
+  patient_detail_id INT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+  FOREIGN KEY (patient_detail_id) REFERENCES meeting_patient_details(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS meeting_attachments (

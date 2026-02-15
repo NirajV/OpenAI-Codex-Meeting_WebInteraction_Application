@@ -1,10 +1,13 @@
 const teamForm = document.getElementById('teamForm');
 const memberForm = document.getElementById('memberForm');
+const patientDetailsForm = document.getElementById('patientDetailsForm');
 const meetingForm = document.getElementById('meetingForm');
 const teamList = document.getElementById('teamList');
 const memberList = document.getElementById('memberList');
+const patientDetailsList = document.getElementById('patientDetailsList');
 const meetingList = document.getElementById('meetingList');
 const memberTeams = document.getElementById('memberTeams');
+const patientDetailId = document.getElementById('patientDetailId');
 const inviteeCheckboxes = document.getElementById('inviteeCheckboxes');
 const message = document.getElementById('message');
 const scheduleType = document.getElementById('scheduleType');
@@ -15,7 +18,6 @@ const showMessage = (text, isError = false) => {
   message.textContent = text;
   message.style.color = isError ? '#b91c1c' : '#047857';
 };
-
 
 const toBase64 = (file) =>
   new Promise((resolve, reject) => {
@@ -47,9 +49,7 @@ const refreshTeams = async () => {
   const teams = await fetchJSON('/api/teams');
   teamList.innerHTML = teams.map((team) => `<li>${team.name}</li>`).join('');
 
-  memberTeams.innerHTML = teams
-    .map((team) => `<option value="${team.id}">${team.name}</option>`)
-    .join('');
+  memberTeams.innerHTML = teams.map((team) => `<option value="${team.id}">${team.name}</option>`).join('');
 };
 
 const refreshMembers = async () => {
@@ -60,10 +60,31 @@ const refreshMembers = async () => {
 
   inviteeCheckboxes.innerHTML = members
     .map(
-      (member) =>
-        `<label><input type="checkbox" value="${member.id}" /> ${member.fullName} (${member.email})</label>`
+      (member) => `<label><input type="checkbox" value="${member.id}" /> ${member.fullName} (${member.email})</label>`
     )
     .join('');
+};
+
+const formatPatientOption = (detail) =>
+  `${detail.medicalRecordNumber} | ${detail.patientName} | ${detail.doctorName} (${detail.departmentName})`;
+
+const refreshPatientDetails = async () => {
+  const details = await fetchJSON('/api/patient-details');
+
+  patientDetailsList.innerHTML = details
+    .map(
+      (detail) =>
+        `<li><strong>${detail.patientName}</strong> (MRN: ${detail.medicalRecordNumber}, DOB: ${detail.patientDateOfBirth})` +
+        `<br/>Doctor: ${detail.doctorName} | Department: ${detail.departmentName}` +
+        `${detail.meetingAgendaNote ? `<br/>Agenda: ${detail.meetingAgendaNote}` : ''}` +
+        `${detail.patientDescription ? `<br/>Patient Description: ${detail.patientDescription}` : ''}</li>`
+    )
+    .join('');
+
+  patientDetailId.innerHTML = [
+    '<option value="">Select patient details</option>',
+    ...details.map((detail) => `<option value="${detail.id}">${formatPatientOption(detail)}</option>`),
+  ].join('');
 };
 
 const refreshMeetings = async () => {
@@ -121,12 +142,35 @@ memberForm.addEventListener('submit', async (event) => {
   }
 });
 
+patientDetailsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  try {
+    await fetchJSON('/api/patient-details', {
+      method: 'POST',
+      body: JSON.stringify({
+        medicalRecordNumber: document.getElementById('medicalRecordNumber').value,
+        patientName: document.getElementById('patientName').value,
+        patientDateOfBirth: document.getElementById('patientDateOfBirth').value,
+        patientDescription: document.getElementById('patientDescription').value || null,
+        doctorName: document.getElementById('doctorName').value,
+        departmentName: document.getElementById('departmentName').value,
+        meetingAgendaNote: document.getElementById('meetingAgendaNote').value || null,
+      }),
+    });
+
+    patientDetailsForm.reset();
+    await refreshPatientDetails();
+    showMessage('Patient details added successfully.');
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+});
+
 meetingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
-  const inviteeIds = [...inviteeCheckboxes.querySelectorAll('input:checked')].map((checkbox) =>
-    Number(checkbox.value)
-  );
+  const inviteeIds = [...inviteeCheckboxes.querySelectorAll('input:checked')].map((checkbox) => Number(checkbox.value));
 
   try {
     const attachmentFiles = [...meetingAttachments.files];
@@ -140,6 +184,7 @@ meetingForm.addEventListener('submit', async (event) => {
 
     const payload = {
       name: document.getElementById('meetingName').value,
+      patientDetailId: Number(patientDetailId.value),
       startsAt: document.getElementById('startsAt').value,
       startTime: document.getElementById('startTime').value,
       endTime: document.getElementById('endTime').value,
@@ -147,13 +192,6 @@ meetingForm.addEventListener('submit', async (event) => {
       scheduleType: scheduleType.value,
       recurrenceRule: document.getElementById('recurrenceRule').value || null,
       recurrenceEndDate: document.getElementById('recurrenceEndDate').value || null,
-      medicalRecordNumber: document.getElementById('medicalRecordNumber').value,
-      patientName: document.getElementById('patientName').value,
-      patientDateOfBirth: document.getElementById('patientDateOfBirth').value,
-      patientDescription: document.getElementById('patientDescription').value || null,
-      doctorName: document.getElementById('doctorName').value,
-      departmentName: document.getElementById('departmentName').value,
-      meetingAgendaNote: document.getElementById('meetingAgendaNote').value || null,
       attachments,
       inviteeIds,
     };
@@ -162,6 +200,7 @@ meetingForm.addEventListener('submit', async (event) => {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+
     meetingForm.reset();
     recurringFields.classList.add('hidden');
     await refreshMeetings();
@@ -181,7 +220,7 @@ scheduleType.addEventListener('change', () => {
 
 const init = async () => {
   try {
-    await Promise.all([refreshTeams(), refreshMembers(), refreshMeetings()]);
+    await Promise.all([refreshTeams(), refreshMembers(), refreshPatientDetails(), refreshMeetings()]);
   } catch (error) {
     showMessage(error.message, true);
   }
