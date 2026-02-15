@@ -96,11 +96,12 @@ const refreshMeetings = async () => {
         `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
         `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
         `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
+        `<br/>Patient & Doctor Details:` +
         `<br/>Patient: ${meeting.patientName || 'N/A'} | MRN: ${meeting.medicalRecordNumber || 'N/A'} | DOB: ${meeting.patientDateOfBirth || 'N/A'}` +
         `<br/>Doctor: ${meeting.doctorName || 'N/A'} | Department: ${meeting.departmentName || 'N/A'}` +
         `${meeting.meetingAgendaNote ? `<br/>Agenda: ${meeting.meetingAgendaNote}` : ''}` +
         `${meeting.patientDescription ? `<br/>Patient Description: ${meeting.patientDescription}` : ''}` +
-        `<br/>Attachments: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
+        `<br/>Attach documentation / image / scan report: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
         `<br/>Invitees: ${meeting.invitees || 'None'}</li>`
     )
     .join('');
