@@ -1,44 +1,43 @@
 import json
 import os
-import sqlite3
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+import mysql.connector
+
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 DB_DIR = BASE_DIR / "db"
 SCHEMA_PATH = DB_DIR / "schema.sql"
-LEGACY_DB_PATH = DB_DIR / "meetings.db"
-DB_PATH = Path(os.environ.get("DB_PATH", DB_DIR / "general_meetings_db.db")).resolve()
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(BASE_DIR / ".env")
+except Exception:
+    pass
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return mysql.connector.connect(
+        host=os.environ.get("DB_HOST", "127.0.0.1"),
+        port=int(os.environ.get("DB_PORT", "3306")),
+        user=os.environ.get("DB_USER", "root"),
+        password=os.environ.get("DB_PASSWORD", "12345678"),
+        database=os.environ.get("DB_NAME", "General_meetings_db"),
+    )
 
 
 def initialize_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
-    if not DB_PATH.exists() and LEGACY_DB_PATH.exists() and DB_PATH != LEGACY_DB_PATH.resolve():
-        DB_PATH.write_bytes(LEGACY_DB_PATH.read_bytes())
-
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn = get_db_connection()
     try:
-        conn.executescript(schema_sql)
-
-        existing_schedule_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(meeting_schedules)").fetchall()
-        }
-        if "start_time" not in existing_schedule_columns:
-            conn.execute("ALTER TABLE meeting_schedules ADD COLUMN start_time TEXT NOT NULL DEFAULT '09:00'")
-        if "end_time" not in existing_schedule_columns:
-            conn.execute("ALTER TABLE meeting_schedules ADD COLUMN end_time TEXT NOT NULL DEFAULT '10:00'")
-
+        cursor = conn.cursor()
+        for _ in cursor.execute(schema_sql, multi=True):
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -46,7 +45,7 @@ def initialize_db():
 
 class AppHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200):
-        payload = json.dumps(data).encode("utf-8")
+        payload = json.dumps(data, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -83,7 +82,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/teams":
             conn = get_db_connection()
             try:
-                cursor = conn.cursor()
+                cursor = conn.cursor(dictionary=True)
                 cursor.execute("SELECT id, name FROM teams ORDER BY name")
                 rows = cursor.fetchall()
             finally:
@@ -94,7 +93,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/members":
             query = """
                 SELECT m.id, m.full_name AS fullName, m.email,
-                       COALESCE(GROUP_CONCAT(t.name, ', '), '') AS teams
+                       COALESCE(GROUP_CONCAT(t.name SEPARATOR ', '), '') AS teams
                 FROM members m
                 LEFT JOIN team_members tm ON tm.member_id = m.id
                 LEFT JOIN teams t ON t.id = tm.team_id
@@ -103,7 +102,7 @@ class AppHandler(BaseHTTPRequestHandler):
             """
             conn = get_db_connection()
             try:
-                cursor = conn.cursor()
+                cursor = conn.cursor(dictionary=True)
                 cursor.execute(query)
                 rows = cursor.fetchall()
             finally:
@@ -121,18 +120,17 @@ class AppHandler(BaseHTTPRequestHandler):
                        ms.schedule_type AS scheduleType,
                        ms.recurrence_rule AS recurrenceRule,
                        ms.recurrence_end_date AS recurrenceEndDate,
-                       GROUP_CONCAT(m.full_name || ' <' || m.email || '>', '; ') AS invitees
+                       GROUP_CONCAT(CONCAT(m.full_name, ' <', m.email, '>') SEPARATOR '; ') AS invitees
                 FROM meetings me
                 JOIN meeting_schedules ms ON ms.meeting_id = me.id
                 LEFT JOIN meeting_invites mi ON mi.meeting_id = me.id
                 LEFT JOIN members m ON m.id = mi.member_id
-                GROUP BY me.id, me.name, ms.starts_at, ms.start_time, ms.end_time, ms.timezone,
-                         ms.schedule_type, ms.recurrence_rule, ms.recurrence_end_date
+                GROUP BY me.id
                 ORDER BY ms.starts_at DESC
             """
             conn = get_db_connection()
             try:
-                cursor = conn.cursor()
+                cursor = conn.cursor(dictionary=True)
                 cursor.execute(query)
                 rows = cursor.fetchall()
             finally:
@@ -155,7 +153,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 conn = get_db_connection()
                 try:
                     cursor = conn.cursor()
-                    cursor.execute("INSERT INTO teams (name) VALUES (?)", (name,))
+                    cursor.execute("INSERT INTO teams (name) VALUES (%s)", (name,))
                     conn.commit()
                 finally:
                     conn.close()
@@ -174,13 +172,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 try:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "INSERT INTO members (full_name, email) VALUES (?, ?)",
+                        "INSERT INTO members (full_name, email) VALUES (%s, %s)",
                         (full_name, email),
                     )
                     member_id = cursor.lastrowid
                     for team_id in team_ids:
                         cursor.execute(
-                            "INSERT INTO team_members (team_id, member_id) VALUES (?, ?)",
+                            "INSERT INTO team_members (team_id, member_id) VALUES (%s, %s)",
                             (int(team_id), member_id),
                         )
                     conn.commit()
@@ -201,7 +199,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 invitee_ids = data.get("inviteeIds") or []
 
                 if not name or not starts_at or not schedule_type or not start_time or not end_time:
-                    self._send_json({"error": "Meeting name, start date/time, start time, end time and schedule type are required."}, 400)
+                    self._send_json(
+                        {
+                            "error": "Meeting name, start date/time, start time, end time and schedule type are required."
+                        },
+                        400,
+                    )
                     return
                 if schedule_type not in ["one-time", "recurring"]:
                     self._send_json({"error": "Schedule type must be one-time or recurring."}, 400)
@@ -220,13 +223,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 conn = get_db_connection()
                 try:
                     cursor = conn.cursor()
-                    cursor.execute("INSERT INTO meetings (name) VALUES (?)", (name,))
+                    cursor.execute("INSERT INTO meetings (name) VALUES (%s)", (name,))
                     meeting_id = cursor.lastrowid
                     cursor.execute(
                         """
                         INSERT INTO meeting_schedules
                         (meeting_id, starts_at, start_time, end_time, timezone, schedule_type, recurrence_rule, recurrence_end_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             meeting_id,
@@ -241,7 +244,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     )
                     for member_id in invitee_ids:
                         cursor.execute(
-                            "INSERT INTO meeting_invites (meeting_id, member_id) VALUES (?, ?)",
+                            "INSERT INTO meeting_invites (meeting_id, member_id) VALUES (%s, %s)",
                             (meeting_id, int(member_id)),
                         )
                     conn.commit()
@@ -251,7 +254,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
 
             self._send_json({"error": "Not found"}, 404)
-        except sqlite3.IntegrityError as error:
+        except mysql.connector.IntegrityError as error:
             self._send_json({"error": str(error)}, 400)
         except ValueError as error:
             self._send_json({"error": f"Invalid date/time: {error}"}, 400)

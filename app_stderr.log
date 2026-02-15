@@ -1,0 +1,6 @@
+127.0.0.1 - - [14/Feb/2026 20:14:04] "POST /api/teams HTTP/1.1" 400 -
+127.0.0.1 - - [14/Feb/2026 20:14:04] "POST /api/members HTTP/1.1" 400 -
+127.0.0.1 - - [14/Feb/2026 20:14:04] "POST /api/meetings HTTP/1.1" 201 -
+127.0.0.1 - - [14/Feb/2026 20:14:04] "GET /api/teams HTTP/1.1" 200 -
+127.0.0.1 - - [14/Feb/2026 20:14:04] "GET /api/members HTTP/1.1" 200 -
+127.0.0.1 - - [14/Feb/2026 20:14:04] "GET /api/meetings HTTP/1.1" 200 -
