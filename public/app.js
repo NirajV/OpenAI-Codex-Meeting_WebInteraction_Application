@@ -9,11 +9,25 @@ const inviteeCheckboxes = document.getElementById('inviteeCheckboxes');
 const message = document.getElementById('message');
 const scheduleType = document.getElementById('scheduleType');
 const recurringFields = document.getElementById('recurringFields');
+const meetingAttachments = document.getElementById('meetingAttachments');
 
 const showMessage = (text, isError = false) => {
   message.textContent = text;
   message.style.color = isError ? '#b91c1c' : '#047857';
 };
+
+
+const toBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const [, base64Content = ''] = result.split(',');
+      resolve(base64Content);
+    };
+    reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
 
 const fetchJSON = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -61,6 +75,11 @@ const refreshMeetings = async () => {
         `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
         `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
         `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
+        `<br/>Patient: ${meeting.patientName || 'N/A'} | MRN: ${meeting.medicalRecordNumber || 'N/A'} | DOB: ${meeting.patientDateOfBirth || 'N/A'}` +
+        `<br/>Doctor: ${meeting.doctorName || 'N/A'} | Department: ${meeting.departmentName || 'N/A'}` +
+        `${meeting.meetingAgendaNote ? `<br/>Agenda: ${meeting.meetingAgendaNote}` : ''}` +
+        `${meeting.patientDescription ? `<br/>Patient Description: ${meeting.patientDescription}` : ''}` +
+        `<br/>Attachments: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
         `<br/>Invitees: ${meeting.invitees || 'None'}</li>`
     )
     .join('');
@@ -109,19 +128,36 @@ meetingForm.addEventListener('submit', async (event) => {
     Number(checkbox.value)
   );
 
-  const payload = {
-    name: document.getElementById('meetingName').value,
-    startsAt: document.getElementById('startsAt').value,
-    startTime: document.getElementById('startTime').value,
-    endTime: document.getElementById('endTime').value,
-    timezone: document.getElementById('timezone').value,
-    scheduleType: scheduleType.value,
-    recurrenceRule: document.getElementById('recurrenceRule').value || null,
-    recurrenceEndDate: document.getElementById('recurrenceEndDate').value || null,
-    inviteeIds,
-  };
-
   try {
+    const attachmentFiles = [...meetingAttachments.files];
+    const attachments = await Promise.all(
+      attachmentFiles.map(async (file) => ({
+        fileName: file.name,
+        fileType: file.type || null,
+        fileData: await toBase64(file),
+      }))
+    );
+
+    const payload = {
+      name: document.getElementById('meetingName').value,
+      startsAt: document.getElementById('startsAt').value,
+      startTime: document.getElementById('startTime').value,
+      endTime: document.getElementById('endTime').value,
+      timezone: document.getElementById('timezone').value,
+      scheduleType: scheduleType.value,
+      recurrenceRule: document.getElementById('recurrenceRule').value || null,
+      recurrenceEndDate: document.getElementById('recurrenceEndDate').value || null,
+      medicalRecordNumber: document.getElementById('medicalRecordNumber').value,
+      patientName: document.getElementById('patientName').value,
+      patientDateOfBirth: document.getElementById('patientDateOfBirth').value,
+      patientDescription: document.getElementById('patientDescription').value || null,
+      doctorName: document.getElementById('doctorName').value,
+      departmentName: document.getElementById('departmentName').value,
+      meetingAgendaNote: document.getElementById('meetingAgendaNote').value || null,
+      attachments,
+      inviteeIds,
+    };
+
     await fetchJSON('/api/meetings', {
       method: 'POST',
       body: JSON.stringify(payload),
