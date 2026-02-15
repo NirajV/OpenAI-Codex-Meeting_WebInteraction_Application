@@ -7,7 +7,6 @@ const memberList = document.getElementById('memberList');
 const patientDetailsList = document.getElementById('patientDetailsList');
 const meetingList = document.getElementById('meetingList');
 const memberTeams = document.getElementById('memberTeams');
-const patientDetailId = document.getElementById('patientDetailId');
 const inviteeCheckboxes = document.getElementById('inviteeCheckboxes');
 const message = document.getElementById('message');
 const scheduleType = document.getElementById('scheduleType');
@@ -65,9 +64,6 @@ const refreshMembers = async () => {
     .join('');
 };
 
-const formatPatientOption = (detail) =>
-  `${detail.medicalRecordNumber} | ${detail.patientName} | ${detail.doctorName} (${detail.departmentName})`;
-
 const refreshPatientDetails = async () => {
   const details = await fetchJSON('/api/patient-details');
 
@@ -80,11 +76,6 @@ const refreshPatientDetails = async () => {
         `${detail.patientDescription ? `<br/>Patient Description: ${detail.patientDescription}` : ''}</li>`
     )
     .join('');
-
-  patientDetailId.innerHTML = [
-    '<option value="">Select patient details</option>',
-    ...details.map((detail) => `<option value="${detail.id}">${formatPatientOption(detail)}</option>`),
-  ].join('');
 };
 
 const refreshMeetings = async () => {
@@ -96,11 +87,6 @@ const refreshMeetings = async () => {
         `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
         `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
         `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
-        `<br/>Patient & Doctor Details:` +
-        `<br/>Patient: ${meeting.patientName || 'N/A'} | MRN: ${meeting.medicalRecordNumber || 'N/A'} | DOB: ${meeting.patientDateOfBirth || 'N/A'}` +
-        `<br/>Doctor: ${meeting.doctorName || 'N/A'} | Department: ${meeting.departmentName || 'N/A'}` +
-        `${meeting.meetingAgendaNote ? `<br/>Agenda: ${meeting.meetingAgendaNote}` : ''}` +
-        `${meeting.patientDescription ? `<br/>Patient Description: ${meeting.patientDescription}` : ''}` +
         `<br/>Attach documentation / image / scan report: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
         `<br/>Invitees: ${meeting.invitees || 'None'}</li>`
     )
@@ -185,7 +171,6 @@ meetingForm.addEventListener('submit', async (event) => {
 
     const payload = {
       name: document.getElementById('meetingName').value,
-      patientDetailId: Number(patientDetailId.value),
       startsAt: document.getElementById('startsAt').value,
       startTime: document.getElementById('startTime').value,
       endTime: document.getElementById('endTime').value,
