@@ -80,6 +80,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+
         if parsed.path == "/api/teams":
             conn = get_db_connection()
             try:
@@ -94,11 +95,11 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/members":
             query = """
                 SELECT m.id, m.full_name AS fullName, m.email,
-                       COALESCE(GROUP_CONCAT(t.name SEPARATOR ', '), '') AS teams
+                       COALESCE(GROUP_CONCAT(t.name ORDER BY t.name SEPARATOR ', '), '') AS teams
                 FROM members m
                 LEFT JOIN team_members tm ON tm.member_id = m.id
                 LEFT JOIN teams t ON t.id = tm.team_id
-                GROUP BY m.id
+                GROUP BY m.id, m.full_name, m.email
                 ORDER BY m.full_name
             """
             conn = get_db_connection()
@@ -114,6 +115,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/meetings":
             query = """
                 SELECT me.id, me.name,
+                       mpd.id AS patientDetailId,
                        mpd.patient_name AS patientName,
                        mpd.medical_record_number AS medicalRecordNumber,
                        mpd.patient_date_of_birth AS patientDateOfBirth,
@@ -130,19 +132,17 @@ class AppHandler(BaseHTTPRequestHandler):
                        ms.recurrence_end_date AS recurrenceEndDate,
                        COUNT(DISTINCT ma.id) AS attachmentCount,
                        GROUP_CONCAT(DISTINCT ma.file_name ORDER BY ma.file_name SEPARATOR ', ') AS attachmentNames,
-                       GROUP_CONCAT(DISTINCT CONCAT(m.full_name, ' <', m.email, '>') SEPARATOR '; ') AS invitees
+                       GROUP_CONCAT(DISTINCT CONCAT(m.full_name, ' <', m.email, '>') ORDER BY m.full_name SEPARATOR '; ') AS invitees
                 FROM meetings me
                 JOIN meeting_schedules ms ON ms.meeting_id = me.id
                 LEFT JOIN meeting_patient_details mpd ON mpd.id = me.patient_detail_id
-                       GROUP_CONCAT(DISTINCT ma.file_name SEPARATOR ', ') AS attachmentNames,
-                       GROUP_CONCAT(CONCAT(m.full_name, ' <', m.email, '>') SEPARATOR '; ') AS invitees
-                FROM meetings me
-                JOIN meeting_schedules ms ON ms.meeting_id = me.id
                 LEFT JOIN meeting_attachments ma ON ma.meeting_id = me.id
                 LEFT JOIN meeting_invites mi ON mi.meeting_id = me.id
                 LEFT JOIN members m ON m.id = mi.member_id
-                GROUP BY me.id
-                ORDER BY ms.starts_at DESC
+                GROUP BY me.id, me.name, mpd.id, mpd.patient_name, mpd.medical_record_number, mpd.patient_date_of_birth,
+                         mpd.doctor_name, mpd.department_name, mpd.meeting_agenda_note, mpd.patient_description,
+                         ms.starts_at, ms.start_time, ms.end_time, ms.timezone, ms.schedule_type, ms.recurrence_rule, ms.recurrence_end_date
+                ORDER BY ms.starts_at DESC, ms.start_time DESC
             """
             conn = get_db_connection()
             try:
@@ -156,27 +156,19 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/patient-details":
             query = """
-                SELECT id,
-                       medical_record_number AS medicalRecordNumber,
-                       patient_name AS patientName,
-                       patient_date_of_birth AS patientDateOfBirth,
-                       patient_description AS patientDescription,
-                       doctor_name AS doctorName,
-                       department_name AS departmentName,
-                       meeting_agenda_note AS meetingAgendaNote
-                FROM meeting_patient_details
-                ORDER BY created_at DESC
-                SELECT
-                    id,
-                    medical_record_number AS medicalRecordNumber,
-                    patient_name AS patientName,
-                    patient_date_of_birth AS patientDateOfBirth,
-                    patient_description AS patientDescription,
-                    doctor_name AS doctorName,
-                    department_name AS departmentName,
-                    meeting_agenda_note AS meetingAgendaNote
-                FROM meeting_patient_details
-                ORDER BY created_at DESC, id DESC
+                SELECT mpd.id,
+                       me.id AS meetingId,
+                       me.name AS meetingName,
+                       mpd.medical_record_number AS medicalRecordNumber,
+                       mpd.patient_name AS patientName,
+                       mpd.patient_date_of_birth AS patientDateOfBirth,
+                       mpd.patient_description AS patientDescription,
+                       mpd.doctor_name AS doctorName,
+                       mpd.department_name AS departmentName,
+                       mpd.meeting_agenda_note AS meetingAgendaNote
+                FROM meeting_patient_details mpd
+                LEFT JOIN meetings me ON me.patient_detail_id = mpd.id
+                ORDER BY mpd.created_at DESC, mpd.id DESC
             """
             conn = get_db_connection()
             try:
@@ -200,14 +192,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not name:
                     self._send_json({"error": "Team name is required."}, 400)
                     return
+
                 conn = get_db_connection()
                 try:
                     cursor = conn.cursor()
                     cursor.execute("INSERT INTO teams (name) VALUES (%s)", (name,))
                     conn.commit()
+                    team_id = cursor.lastrowid
                 finally:
                     conn.close()
-                self._send_json({"id": cursor.lastrowid, "name": name}, 201)
+
+                self._send_json({"id": team_id, "name": name}, 201)
                 return
 
             if parsed.path == "/api/members":
@@ -234,64 +229,12 @@ class AppHandler(BaseHTTPRequestHandler):
                     conn.commit()
                 finally:
                     conn.close()
+
                 self._send_json({"id": member_id, "fullName": full_name, "email": email}, 201)
-                return
-
-            if parsed.path == "/api/patient-details":
-                medical_record_number = (data.get("medicalRecordNumber") or "").strip()
-                patient_name = (data.get("patientName") or "").strip()
-                patient_date_of_birth = data.get("patientDateOfBirth")
-                patient_description = (data.get("patientDescription") or "").strip() or None
-                doctor_name = (data.get("doctorName") or "").strip()
-                department_name = (data.get("departmentName") or "").strip()
-                meeting_agenda_note = (data.get("meetingAgendaNote") or "").strip() or None
-
-                if (
-                    not medical_record_number
-                    or not patient_name
-                    or not patient_date_of_birth
-                    or not doctor_name
-                    or not department_name
-                ):
-                    self._send_json(
-                        {
-                            "error": "Medical record number, patient name/date of birth, doctor name and department are required."
-                        },
-                        400,
-                    )
-                    return
-
-                datetime.fromisoformat(patient_date_of_birth)
-
-                conn = get_db_connection()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        """
-                        INSERT INTO meeting_patient_details
-                        (medical_record_number, patient_name, patient_date_of_birth, patient_description, doctor_name, department_name, meeting_agenda_note)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            medical_record_number,
-                            patient_name,
-                            patient_date_of_birth,
-                            patient_description,
-                            doctor_name,
-                            department_name,
-                            meeting_agenda_note,
-                        ),
-                    )
-                    conn.commit()
-                    detail_id = cursor.lastrowid
-                finally:
-                    conn.close()
-                self._send_json({"id": detail_id, "message": "Patient details added successfully."}, 201)
                 return
 
             if parsed.path == "/api/meetings":
                 name = (data.get("name") or "").strip()
-                patient_detail_id = data.get("patientDetailId")
                 starts_at = data.get("startsAt")
                 start_time = data.get("startTime")
                 end_time = data.get("endTime")
@@ -302,10 +245,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 invitee_ids = data.get("inviteeIds") or []
                 attachments = data.get("attachments") or []
 
-                if not name or not starts_at or not schedule_type or not start_time or not end_time or not patient_detail_id:
+                if not name or not starts_at or not schedule_type or not start_time or not end_time:
                     self._send_json(
                         {
-                            "error": "Meeting name, patient details, start date/time, start time, end time and schedule type are required."
+                            "error": "Meeting name, start date/time, start time, end time and schedule type are required."
                         },
                         400,
                     )
@@ -327,10 +270,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 conn = get_db_connection()
                 try:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT INTO meetings (name, patient_detail_id) VALUES (%s, %s)",
-                        (name, int(patient_detail_id)),
-                    )
+                    cursor.execute("INSERT INTO meetings (name) VALUES (%s)", (name,))
                     meeting_id = cursor.lastrowid
                     cursor.execute(
                         """
@@ -349,6 +289,7 @@ class AppHandler(BaseHTTPRequestHandler):
                             recurrence_end if schedule_type == "recurring" else None,
                         ),
                     )
+
                     for member_id in invitee_ids:
                         cursor.execute(
                             "INSERT INTO meeting_invites (meeting_id, member_id) VALUES (%s, %s)",
@@ -357,40 +298,28 @@ class AppHandler(BaseHTTPRequestHandler):
 
                     for attachment in attachments:
                         file_name = (attachment.get("fileName") or "").strip()
+                        file_type = (attachment.get("fileType") or "").strip() or None
                         file_data = attachment.get("fileData")
                         if not file_name or not file_data:
                             continue
-
                         blob_data = base64.b64decode(file_data, validate=True)
-
-                    for attachment in attachments:
-                        file_name = (attachment.get("fileName") or "").strip()
-                        file_type = (attachment.get("fileType") or "").strip() or None
-                        file_data = attachment.get("fileData") or ""
-                        if not file_name or not file_data:
-                            continue
-                        binary_data = file_data.encode("utf-8")
                         cursor.execute(
                             """
                             INSERT INTO meeting_attachments (meeting_id, file_name, file_type, file_size, file_data)
                             VALUES (%s, %s, %s, %s, %s)
                             """,
-                            (
-                                meeting_id,
-                                file_name,
-                                attachment.get("fileType") or None,
-                                len(blob_data),
-                                blob_data,
-                            ),
-                            (meeting_id, file_name, file_type, len(binary_data), binary_data),
+                            (meeting_id, file_name, file_type, len(blob_data), blob_data),
                         )
+
                     conn.commit()
                 finally:
                     conn.close()
+
                 self._send_json({"message": "Meeting created successfully.", "meetingId": meeting_id}, 201)
                 return
 
             if parsed.path == "/api/patient-details":
+                meeting_id = data.get("meetingId")
                 medical_record_number = (data.get("medicalRecordNumber") or "").strip()
                 patient_name = (data.get("patientName") or "").strip()
                 patient_date_of_birth = data.get("patientDateOfBirth")
@@ -400,7 +329,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 meeting_agenda_note = (data.get("meetingAgendaNote") or "").strip() or None
 
                 if (
-                    not medical_record_number
+                    not meeting_id
+                    or not medical_record_number
                     or not patient_name
                     or not patient_date_of_birth
                     or not doctor_name
@@ -408,7 +338,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 ):
                     self._send_json(
                         {
-                            "error": "Medical record number, patient name/date of birth, doctor name and department name are required."
+                            "error": "Meeting ID, medical record number, patient name/date of birth, doctor name and department are required."
                         },
                         400,
                     )
@@ -418,6 +348,13 @@ class AppHandler(BaseHTTPRequestHandler):
 
                 conn = get_db_connection()
                 try:
+                    cursor = conn.cursor(dictionary=True)
+                    cursor.execute("SELECT id FROM meetings WHERE id = %s", (int(meeting_id),))
+                    meeting = cursor.fetchone()
+                    if not meeting:
+                        self._send_json({"error": "Meeting ID not found."}, 400)
+                        return
+
                     cursor = conn.cursor()
                     cursor.execute(
                         """
@@ -435,15 +372,19 @@ class AppHandler(BaseHTTPRequestHandler):
                             meeting_agenda_note,
                         ),
                     )
-                    conn.commit()
                     patient_detail_id = cursor.lastrowid
+                    cursor.execute(
+                        "UPDATE meetings SET patient_detail_id = %s WHERE id = %s",
+                        (patient_detail_id, int(meeting_id)),
+                    )
+                    conn.commit()
                 finally:
                     conn.close()
 
                 self._send_json(
                     {
                         "id": patient_detail_id,
-                        "medicalRecordNumber": medical_record_number,
+                        "meetingId": int(meeting_id),
                         "patientName": patient_name,
                     },
                     201,

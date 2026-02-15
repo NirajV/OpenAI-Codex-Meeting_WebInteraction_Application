@@ -8,6 +8,7 @@ const patientDetailsList = document.getElementById('patientDetailsList');
 const meetingList = document.getElementById('meetingList');
 const memberTeams = document.getElementById('memberTeams');
 const inviteeCheckboxes = document.getElementById('inviteeCheckboxes');
+const patientMeetingId = document.getElementById('patientMeetingId');
 const message = document.getElementById('message');
 const scheduleType = document.getElementById('scheduleType');
 const recurringFields = document.getElementById('recurringFields');
@@ -47,7 +48,6 @@ const fetchJSON = async (url, options = {}) => {
 const refreshTeams = async () => {
   const teams = await fetchJSON('/api/teams');
   teamList.innerHTML = teams.map((team) => `<li>${team.name}</li>`).join('');
-
   memberTeams.innerHTML = teams.map((team) => `<option value="${team.id}">${team.name}</option>`).join('');
 };
 
@@ -64,6 +64,27 @@ const refreshMembers = async () => {
     .join('');
 };
 
+const refreshMeetings = async () => {
+  const meetings = await fetchJSON('/api/meetings');
+
+  meetingList.innerHTML = meetings
+    .map(
+      (meeting) =>
+        `<li><strong>#${meeting.id} ${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt}` +
+        `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
+        `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
+        `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
+        `<br/>Attach documentation / image / scan report: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
+        `<br/>Invitees: ${meeting.invitees || 'None'}` +
+        `<br/>Patient linked: ${meeting.patientName ? `${meeting.patientName} (MRN: ${meeting.medicalRecordNumber})` : 'Not linked yet'}</li>`
+    )
+    .join('');
+
+  patientMeetingId.innerHTML =
+    '<option value="">Select meeting</option>' +
+    meetings.map((meeting) => `<option value="${meeting.id}">#${meeting.id} - ${meeting.name}</option>`).join('');
+};
+
 const refreshPatientDetails = async () => {
   const details = await fetchJSON('/api/patient-details');
 
@@ -71,24 +92,10 @@ const refreshPatientDetails = async () => {
     .map(
       (detail) =>
         `<li><strong>${detail.patientName}</strong> (MRN: ${detail.medicalRecordNumber}, DOB: ${detail.patientDateOfBirth})` +
+        `<br/>Meeting: ${detail.meetingId ? `#${detail.meetingId} ${detail.meetingName}` : 'Unassigned'}` +
         `<br/>Doctor: ${detail.doctorName} | Department: ${detail.departmentName}` +
         `${detail.meetingAgendaNote ? `<br/>Agenda: ${detail.meetingAgendaNote}` : ''}` +
         `${detail.patientDescription ? `<br/>Patient Description: ${detail.patientDescription}` : ''}</li>`
-    )
-    .join('');
-};
-
-const refreshMeetings = async () => {
-  const meetings = await fetchJSON('/api/meetings');
-  meetingList.innerHTML = meetings
-    .map(
-      (meeting) =>
-        `<li><strong>${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt}` +
-        `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
-        `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
-        `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
-        `<br/>Attach documentation / image / scan report: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
-        `<br/>Invitees: ${meeting.invitees || 'None'}</li>`
     )
     .join('');
 };
@@ -129,34 +136,8 @@ memberForm.addEventListener('submit', async (event) => {
   }
 });
 
-patientDetailsForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-
-  try {
-    await fetchJSON('/api/patient-details', {
-      method: 'POST',
-      body: JSON.stringify({
-        medicalRecordNumber: document.getElementById('medicalRecordNumber').value,
-        patientName: document.getElementById('patientName').value,
-        patientDateOfBirth: document.getElementById('patientDateOfBirth').value,
-        patientDescription: document.getElementById('patientDescription').value || null,
-        doctorName: document.getElementById('doctorName').value,
-        departmentName: document.getElementById('departmentName').value,
-        meetingAgendaNote: document.getElementById('meetingAgendaNote').value || null,
-      }),
-    });
-
-    patientDetailsForm.reset();
-    await refreshPatientDetails();
-    showMessage('Patient details added successfully.');
-  } catch (error) {
-    showMessage(error.message, true);
-  }
-});
-
 meetingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-
   const inviteeIds = [...inviteeCheckboxes.querySelectorAll('input:checked')].map((checkbox) => Number(checkbox.value));
 
   try {
@@ -189,8 +170,34 @@ meetingForm.addEventListener('submit', async (event) => {
 
     meetingForm.reset();
     recurringFields.classList.add('hidden');
-    await refreshMeetings();
+    await Promise.all([refreshMeetings(), refreshPatientDetails()]);
     showMessage('Meeting created successfully.');
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+});
+
+patientDetailsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  try {
+    await fetchJSON('/api/patient-details', {
+      method: 'POST',
+      body: JSON.stringify({
+        meetingId: Number(patientMeetingId.value),
+        medicalRecordNumber: document.getElementById('medicalRecordNumber').value,
+        patientName: document.getElementById('patientName').value,
+        patientDateOfBirth: document.getElementById('patientDateOfBirth').value,
+        patientDescription: document.getElementById('patientDescription').value || null,
+        doctorName: document.getElementById('doctorName').value,
+        departmentName: document.getElementById('departmentName').value,
+        meetingAgendaNote: document.getElementById('meetingAgendaNote').value || null,
+      }),
+    });
+
+    patientDetailsForm.reset();
+    await Promise.all([refreshPatientDetails(), refreshMeetings()]);
+    showMessage('Patient details linked to meeting successfully.');
   } catch (error) {
     showMessage(error.message, true);
   }
@@ -206,7 +213,10 @@ scheduleType.addEventListener('change', () => {
 
 const init = async () => {
   try {
-    await Promise.all([refreshTeams(), refreshMembers(), refreshPatientDetails(), refreshMeetings()]);
+    await refreshTeams();
+    await refreshMembers();
+    await refreshMeetings();
+    await refreshPatientDetails();
   } catch (error) {
     showMessage(error.message, true);
   }
