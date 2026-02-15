@@ -9,7 +9,7 @@
   <body>
     <main class="container">
       <h1>Meeting Planner</h1>
-      <p>Create teams, add members, and schedule one-time or recurring meetings.</p>
+      <p>Create teams, add members, maintain patient/doctor details, and schedule meetings.</p>
 
       <section class="card">
         <h2>1) Create Team</h2>
@@ -33,9 +33,29 @@
       </section>
 
       <section class="card">
-        <h2>3) Schedule Meeting & Invite Members</h2>
+        <h2>3) Add Patient & Doctor Details</h2>
+        <p class="section-note">You can add multiple entries for the same patient over time with different doctors/departments.</p>
+        <form id="patientDetailsForm">
+          <input type="text" id="medicalRecordNumber" placeholder="Medical record number" required />
+          <input type="text" id="patientName" placeholder="Patient name" required />
+          <label for="patientDateOfBirth">Patient date of birth</label>
+          <input type="date" id="patientDateOfBirth" required />
+          <textarea id="patientDescription" placeholder="Patient description"></textarea>
+          <input type="text" id="doctorName" placeholder="Doctor name" required />
+          <input type="text" id="departmentName" placeholder="Department name" required />
+          <textarea id="meetingAgendaNote" placeholder="Meeting agenda note"></textarea>
+          <button type="submit">Save Patient Details</button>
+        </form>
+        <ul id="patientDetailsList"></ul>
+      </section>
+
+      <section class="card">
+        <h2>4) Schedule Meeting & Invite Members</h2>
         <form id="meetingForm">
           <input type="text" id="meetingName" placeholder="Meeting name" required />
+
+          <label for="patientDetailId">Patient & doctor detail entry</label>
+          <select id="patientDetailId" required></select>
 
           <label for="startsAt">Start date</label>
           <input type="date" id="startsAt" required />
@@ -61,19 +81,8 @@
             <input type="date" id="recurrenceEndDate" />
           </div>
 
-          <fieldset>
-            <legend>Patient & Doctor Details</legend>
-            <input type="text" id="medicalRecordNumber" placeholder="Medical record number" required />
-            <input type="text" id="patientName" placeholder="Patient name" required />
-            <label for="patientDateOfBirth">Patient date of birth</label>
-            <input type="date" id="patientDateOfBirth" required />
-            <textarea id="patientDescription" placeholder="Patient description"></textarea>
-            <input type="text" id="doctorName" placeholder="Doctor name" required />
-            <input type="text" id="departmentName" placeholder="Department name" required />
-            <textarea id="meetingAgendaNote" placeholder="Meeting agenda note"></textarea>
-            <label for="meetingAttachments">Attach documentation / image / scan report</label>
-            <input type="file" id="meetingAttachments" multiple />
-          </fieldset>
+          <label for="meetingAttachments">Attach documentation / image / scan report</label>
+          <input type="file" id="meetingAttachments" multiple />
 
           <fieldset>
             <legend>Invite members</legend>
