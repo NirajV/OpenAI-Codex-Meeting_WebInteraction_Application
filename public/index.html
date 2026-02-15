@@ -62,6 +62,20 @@
           </div>
 
           <fieldset>
+            <legend>Patient & Doctor Details</legend>
+            <input type="text" id="medicalRecordNumber" placeholder="Medical record number" required />
+            <input type="text" id="patientName" placeholder="Patient name" required />
+            <label for="patientDateOfBirth">Patient date of birth</label>
+            <input type="date" id="patientDateOfBirth" required />
+            <textarea id="patientDescription" placeholder="Patient description"></textarea>
+            <input type="text" id="doctorName" placeholder="Doctor name" required />
+            <input type="text" id="departmentName" placeholder="Department name" required />
+            <textarea id="meetingAgendaNote" placeholder="Meeting agenda note"></textarea>
+            <label for="meetingAttachments">Attach documentation / image / scan report</label>
+            <input type="file" id="meetingAttachments" multiple />
+          </fieldset>
+
+          <fieldset>
             <legend>Invite members</legend>
             <div id="inviteeCheckboxes" class="checkbox-grid"></div>
           </fieldset>

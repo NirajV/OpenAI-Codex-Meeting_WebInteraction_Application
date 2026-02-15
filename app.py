@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import os
 from datetime import datetime
@@ -120,9 +122,26 @@ class AppHandler(BaseHTTPRequestHandler):
                        ms.schedule_type AS scheduleType,
                        ms.recurrence_rule AS recurrenceRule,
                        ms.recurrence_end_date AS recurrenceEndDate,
+                       mpd.medical_record_number AS medicalRecordNumber,
+                       mpd.patient_name AS patientName,
+                       mpd.patient_date_of_birth AS patientDateOfBirth,
+                       mpd.patient_description AS patientDescription,
+                       mpd.doctor_name AS doctorName,
+                       mpd.department_name AS departmentName,
+                       mpd.meeting_agenda_note AS meetingAgendaNote,
+                       COALESCE(att.attachment_count, 0) AS attachmentCount,
+                       COALESCE(att.attachment_names, '') AS attachmentNames,
                        GROUP_CONCAT(CONCAT(m.full_name, ' <', m.email, '>') SEPARATOR '; ') AS invitees
                 FROM meetings me
                 JOIN meeting_schedules ms ON ms.meeting_id = me.id
+                LEFT JOIN meeting_patient_details mpd ON mpd.meeting_id = me.id
+                LEFT JOIN (
+                    SELECT meeting_id,
+                           COUNT(*) AS attachment_count,
+                           GROUP_CONCAT(file_name SEPARATOR ', ') AS attachment_names
+                    FROM meeting_attachments
+                    GROUP BY meeting_id
+                ) att ON att.meeting_id = me.id
                 LEFT JOIN meeting_invites mi ON mi.meeting_id = me.id
                 LEFT JOIN members m ON m.id = mi.member_id
                 GROUP BY me.id
@@ -197,6 +216,14 @@ class AppHandler(BaseHTTPRequestHandler):
                 recurrence_rule = (data.get("recurrenceRule") or "").strip() or None
                 recurrence_end = data.get("recurrenceEndDate") or None
                 invitee_ids = data.get("inviteeIds") or []
+                medical_record_number = (data.get("medicalRecordNumber") or "").strip()
+                patient_name = (data.get("patientName") or "").strip()
+                patient_date_of_birth = data.get("patientDateOfBirth")
+                patient_description = (data.get("patientDescription") or "").strip() or None
+                doctor_name = (data.get("doctorName") or "").strip()
+                department_name = (data.get("departmentName") or "").strip()
+                meeting_agenda_note = (data.get("meetingAgendaNote") or "").strip() or None
+                attachments = data.get("attachments") or []
 
                 if not name or not starts_at or not schedule_type or not start_time or not end_time:
                     self._send_json(
@@ -212,8 +239,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 if schedule_type == "recurring" and not recurrence_rule:
                     self._send_json({"error": "Recurrence rule is required for recurring meetings."}, 400)
                     return
+                if not medical_record_number or not patient_name or not patient_date_of_birth or not doctor_name or not department_name:
+                    self._send_json(
+                        {
+                            "error": "Medical record number, patient name/date of birth, doctor name, and department name are required."
+                        },
+                        400,
+                    )
+                    return
 
                 datetime.fromisoformat(starts_at)
+                datetime.fromisoformat(patient_date_of_birth)
                 parsed_start_time = datetime.strptime(start_time, "%H:%M")
                 parsed_end_time = datetime.strptime(end_time, "%H:%M")
                 if parsed_end_time <= parsed_start_time:
@@ -247,6 +283,40 @@ class AppHandler(BaseHTTPRequestHandler):
                             "INSERT INTO meeting_invites (meeting_id, member_id) VALUES (%s, %s)",
                             (meeting_id, int(member_id)),
                         )
+
+                    cursor.execute(
+                        """
+                        INSERT INTO meeting_patient_details
+                        (meeting_id, medical_record_number, patient_name, patient_date_of_birth, patient_description, doctor_name, department_name, meeting_agenda_note)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            meeting_id,
+                            medical_record_number,
+                            patient_name,
+                            patient_date_of_birth,
+                            patient_description,
+                            doctor_name,
+                            department_name,
+                            meeting_agenda_note,
+                        ),
+                    )
+
+                    for attachment in attachments:
+                        file_name = (attachment.get("fileName") or "").strip()
+                        file_type = (attachment.get("fileType") or "").strip() or None
+                        file_data_base64 = attachment.get("fileData") or ""
+                        if not file_name or not file_data_base64:
+                            continue
+                        file_bytes = base64.b64decode(file_data_base64, validate=True)
+                        cursor.execute(
+                            """
+                            INSERT INTO meeting_attachments (meeting_id, file_name, file_type, file_size, file_data)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (meeting_id, file_name, file_type, len(file_bytes), file_bytes),
+                        )
+
                     conn.commit()
                 finally:
                     conn.close()
@@ -258,6 +328,8 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json({"error": str(error)}, 400)
         except ValueError as error:
             self._send_json({"error": f"Invalid date/time: {error}"}, 400)
+        except binascii.Error as error:
+            self._send_json({"error": f"Invalid attachment encoding: {error}"}, 400)
         except Exception as error:
             self._send_json({"error": str(error)}, 500)
 
