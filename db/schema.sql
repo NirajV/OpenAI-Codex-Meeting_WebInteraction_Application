@@ -20,37 +20,14 @@ CREATE TABLE IF NOT EXISTS team_members (
   FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS meeting_patient_details (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  medical_record_number VARCHAR(128) NOT NULL,
-  patient_name VARCHAR(255) NOT NULL,
-  patient_date_of_birth DATE NOT NULL,
-  patient_description TEXT,
-  doctor_name VARCHAR(255) NOT NULL,
-  department_name VARCHAR(255) NOT NULL,
-  meeting_agenda_note TEXT,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
 
 CREATE TABLE IF NOT EXISTS meetings (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   organizer_note TEXT,
-  patient_detail_id INT,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (patient_detail_id) REFERENCES meeting_patient_details(id) ON DELETE SET NULL
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS meeting_attachments (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  meeting_id INT NOT NULL,
-  file_name VARCHAR(255) NOT NULL,
-  file_type VARCHAR(128),
-  file_size BIGINT NOT NULL,
-  file_data LONGBLOB NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-);
 
 CREATE TABLE IF NOT EXISTS meeting_schedules (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -68,10 +45,41 @@ CREATE TABLE IF NOT EXISTS meeting_schedules (
 
 CREATE TABLE IF NOT EXISTS meeting_invites (
   meeting_id INT NOT NULL,
-  member_id INT NOT NULL,
+  email VARCHAR(255) NOT NULL,
   invited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   status ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
-  PRIMARY KEY (meeting_id, member_id),
-  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
-  FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+  PRIMARY KEY (meeting_id, email),
+  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS meeting_patient_details (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  meeting_id INT NOT NULL,
+  medical_record_number VARCHAR(128) NOT NULL,
+  patient_name VARCHAR(255) NOT NULL,
+  patient_date_of_birth DATE NOT NULL,
+  patient_description TEXT,
+  doctor_name VARCHAR(255) NOT NULL,
+  department_name VARCHAR(255) NOT NULL,
+  meeting_agenda_note TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_patient_per_meeting (meeting_id, medical_record_number, doctor_name, department_name),
+  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS meeting_attachments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  meeting_id INT NOT NULL,
+  medical_record_number VARCHAR(128) NOT NULL,
+  doctor_name VARCHAR(255) NOT NULL,
+  department_name VARCHAR(255) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_type VARCHAR(128),
+  file_size BIGINT NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (meeting_id, medical_record_number, doctor_name, department_name) 
+    REFERENCES meeting_patient_details(meeting_id, medical_record_number, doctor_name, department_name) 
+    ON DELETE CASCADE
 );

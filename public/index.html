@@ -3,101 +3,267 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Meeting Planner</title>
+    <title>Meeting Planner Pro - Smart Meeting Management</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   </head>
   <body>
+    <!-- Hero Header -->
+    <header class="hero-header">
+      <div class="hero-content">
+        <div class="hero-icon">
+          <i class="fas fa-calendar-check"></i>
+        </div>
+        <h1 class="hero-title">Meeting Planner Pro</h1>
+        <p class="hero-subtitle">Streamline your meetings with intelligent scheduling & team management</p>
+        <div class="feature-badges">
+          <span class="badge"><i class="fas fa-users"></i> Team Management</span>
+          <span class="badge"><i class="fas fa-clock"></i> Smart Scheduling</span>
+          <span class="badge"><i class="fas fa-user-md"></i> Patient Integration</span>
+        </div>
+      </div>
+      <div class="wave-divider">
+        <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
+          <path d="M321.39,56.44c58-10.79,114.16-30.13,172-41.86,82.39-16.72,168.19-17.73,250.45-.39C823.78,31,906.67,72,985.66,92.83c70.05,18.48,146.53,26.09,214.34,3V0H0V27.35A600.21,600.21,0,0,0,321.39,56.44Z"></path>
+        </svg>
+      </div>
+    </header>
+
     <main class="container">
-      <h1>Meeting Planner</h1>
-      <p>Create teams, add members, schedule meetings, and link patient details to a meeting ID.</p>
+      <!-- Progress Steps -->
+      <div class="progress-steps">
+        <div class="step active">
+          <div class="step-number">1</div>
+          <span>Create Team</span>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <span>Add Members</span>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <span>Schedule</span>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <span>Patient Details</span>
+        </div>
+      </div>
 
       <section class="card">
-        <h2>1) Create Team</h2>
+        <div class="card-header">
+          <div class="card-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <i class="fas fa-users-cog"></i>
+          </div>
+          <div>
+            <h2><i class="fas fa-layer-group"></i> Create Team</h2>
+            <p class="card-description">Build your collaborative teams</p>
+          </div>
+        </div>
         <form id="teamForm">
-          <input type="text" id="teamName" placeholder="Team name" required />
-          <button type="submit">Add Team</button>
+          <div class="input-group">
+            <i class="fas fa-users input-icon"></i>
+            <input type="text" id="teamName" placeholder="Enter team name" required />
+          </div>
+          <button type="submit" class="btn-primary">
+            <i class="fas fa-plus-circle"></i> Add Team
+          </button>
         </form>
-        <ul id="teamList"></ul>
+        <ul id="teamList" class="fancy-list"></ul>
       </section>
 
       <section class="card">
-        <h2>2) Add Member</h2>
+        <div class="card-header">
+          <div class="card-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+            <i class="fas fa-user-plus"></i>
+          </div>
+          <div>
+            <h2><i class="fas fa-user-friends"></i> Add Member</h2>
+            <p class="card-description">Invite team members to collaborate</p>
+          </div>
+        </div>
         <form id="memberForm">
-          <input type="text" id="memberName" placeholder="Full name" required />
-          <input type="email" id="memberEmail" placeholder="Email" required />
-          <label for="memberTeams">Assign to Teams</label>
+          <div class="input-group">
+            <i class="fas fa-user input-icon"></i>
+            <input type="text" id="memberName" placeholder="Full name" required />
+          </div>
+          <div class="input-group">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" id="memberEmail" placeholder="Email address" required />
+          </div>
+          <label for="memberTeams"><i class="fas fa-layer-group"></i> Assign to Teams</label>
           <select id="memberTeams" multiple></select>
-          <button type="submit">Add Member</button>
+          <button type="submit" class="btn-primary">
+            <i class="fas fa-user-check"></i> Add Member
+          </button>
         </form>
-        <ul id="memberList"></ul>
+        <ul id="memberList" class="fancy-list"></ul>
       </section>
 
       <section class="card">
-        <h2>3) Schedule Meeting & Invite Members</h2>
+        <div class="card-header">
+          <div class="card-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+            <i class="fas fa-calendar-alt"></i>
+          </div>
+          <div>
+            <h2><i class="fas fa-calendar-plus"></i> Schedule Meeting</h2>
+            <p class="card-description">Set up meetings and invite participants</p>
+          </div>
+        </div>
         <form id="meetingForm">
-          <input type="text" id="meetingName" placeholder="Meeting name" required />
+          <div class="input-group">
+            <i class="fas fa-signature input-icon"></i>
+            <input type="text" id="meetingName" placeholder="Meeting name" required />
+          </div>
 
-          <label for="startsAt">Start date</label>
+          <label for="startsAt"><i class="fas fa-calendar"></i> Start Date</label>
           <input type="date" id="startsAt" required />
 
-          <label for="startTime">Meeting start time</label>
-          <input type="time" id="startTime" required />
+          <div class="time-grid">
+            <div>
+              <label for="startTime"><i class="fas fa-clock"></i> Start Time</label>
+              <input type="time" id="startTime" required />
+            </div>
+            <div>
+              <label for="endTime"><i class="fas fa-clock"></i> End Time</label>
+              <input type="time" id="endTime" required />
+            </div>
+          </div>
 
-          <label for="endTime">Meeting end time</label>
-          <input type="time" id="endTime" required />
+          <label for="timezone"><i class="fas fa-globe"></i> Timezone</label>
+          <div class="input-group">
+            <i class="fas fa-map-marker-alt input-icon"></i>
+            <input type="text" id="timezone" value="UTC" required />
+          </div>
 
-          <label for="timezone">Timezone</label>
-          <input type="text" id="timezone" value="UTC" required />
-
-          <label for="scheduleType">Schedule type</label>
+          <label for="scheduleType"><i class="fas fa-repeat"></i> Schedule Type</label>
           <select id="scheduleType" required>
-            <option value="one-time">One-time</option>
-            <option value="recurring">Recurring</option>
+            <option value="one-time">One-time Meeting</option>
+            <option value="recurring">Recurring Meeting</option>
           </select>
 
           <div id="recurringFields" class="hidden">
-            <input type="text" id="recurrenceRule" placeholder="Recurrence rule (e.g., FREQ=WEEKLY;BYDAY=MO,WE)" />
-            <label for="recurrenceEndDate">Recurrence end date</label>
+            <div class="input-group">
+              <i class="fas fa-sync input-icon"></i>
+              <input type="text" id="recurrenceRule" placeholder="Recurrence rule (e.g., FREQ=WEEKLY;BYDAY=MO,WE)" />
+            </div>
+            <label for="recurrenceEndDate"><i class="fas fa-calendar-times"></i> Recurrence End Date</label>
             <input type="date" id="recurrenceEndDate" />
           </div>
 
-          <label for="meetingAttachments">Attach documentation / image / scan report</label>
-          <input type="file" id="meetingAttachments" multiple />
+          <label for="inviteeEmail"><i class="fas fa-envelope"></i> Invite by Email</label>
+          <div class="input-group">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" id="inviteeEmail" list="emailSuggestions" placeholder="Enter email address (optional)" />
+            <datalist id="emailSuggestions"></datalist>
+          </div>
 
-          <fieldset>
-            <legend>Invite members</legend>
-            <div id="inviteeCheckboxes" class="checkbox-grid"></div>
-          </fieldset>
-
-          <button type="submit">Create Meeting</button>
+          <button type="submit" class="btn-primary btn-large">
+            <i class="fas fa-paper-plane"></i> Create Meeting
+          </button>
         </form>
       </section>
 
       <section class="card">
-        <h2>4) Add Patient & Doctor Details</h2>
-        <p class="section-note">Select a Meeting ID so patient details are connected to that meeting.</p>
+        <div class="card-header">
+          <div class="card-icon" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+            <i class="fas fa-notes-medical"></i>
+          </div>
+          <div>
+            <h2><i class="fas fa-file-medical"></i> Patient & Doctor Details</h2>
+            <p class="card-description">Link patient information to meetings</p>
+          </div>
+        </div>
+        <div class="info-banner">
+          <i class="fas fa-info-circle"></i>
+          <span>Select a Meeting ID and add patient details with their Doctor & Department information. You can add multiple patients to the same meeting!</span>
+        </div>
         <form id="patientDetailsForm">
-          <label for="patientMeetingId">Meeting ID</label>
+          <label for="patientMeetingId"><i class="fas fa-calendar-check"></i> Meeting ID</label>
           <select id="patientMeetingId" required></select>
-          <input type="text" id="medicalRecordNumber" placeholder="Medical record number" required />
-          <input type="text" id="patientName" placeholder="Patient name" required />
-          <label for="patientDateOfBirth">Patient date of birth</label>
-          <input type="date" id="patientDateOfBirth" required />
-          <textarea id="patientDescription" placeholder="Patient description"></textarea>
-          <input type="text" id="doctorName" placeholder="Doctor name" required />
-          <input type="text" id="departmentName" placeholder="Department name" required />
-          <textarea id="meetingAgendaNote" placeholder="Meeting agenda note"></textarea>
-          <button type="submit">Save Patient Details</button>
+          
+          <div class="form-section">
+            <h3><i class="fas fa-user-injured"></i> Patient Information</h3>
+            <div class="input-group">
+              <i class="fas fa-id-card input-icon"></i>
+              <input type="text" id="medicalRecordNumber" placeholder="Medical record number" required />
+            </div>
+            <div class="input-group">
+              <i class="fas fa-user input-icon"></i>
+              <input type="text" id="patientName" placeholder="Patient name" required />
+            </div>
+            <label for="patientDateOfBirth"><i class="fas fa-birthday-cake"></i> Date of Birth</label>
+            <input type="date" id="patientDateOfBirth" required />
+            <textarea id="patientDescription" placeholder="Patient description / medical history"></textarea>
+          </div>
+
+          <div class="form-section">
+            <h3><i class="fas fa-user-md"></i> Medical Team</h3>
+            <div class="input-group">
+              <i class="fas fa-stethoscope input-icon"></i>
+              <input type="text" id="doctorName" placeholder="Doctor name" required />
+            </div>
+            <div class="input-group">
+              <i class="fas fa-hospital input-icon"></i>
+              <input type="text" id="departmentName" placeholder="Department name" required />
+            </div>
+          </div>
+
+          <label for="meetingAgendaNote"><i class="fas fa-clipboard-list"></i> Meeting Agenda</label>
+          <textarea id="meetingAgendaNote" placeholder="Enter meeting agenda and notes"></textarea>
+
+          <label for="patientAttachments"><i class="fas fa-paperclip"></i> Attach Medical Files</label>
+          <div class="file-upload-wrapper">
+            <input type="file" id="patientAttachments" multiple />
+            <span class="file-upload-text"><i class="fas fa-cloud-upload-alt"></i> Choose files or drag here</span>
+          </div>
+          
+          <button type="submit" class="btn-primary btn-large">
+            <i class="fas fa-plus-circle"></i> Add Patient to Meeting
+          </button>
         </form>
-        <ul id="patientDetailsList"></ul>
+        <ul id="patientDetailsList" class="fancy-list"></ul>
       </section>
 
       <section class="card">
-        <h2>Created Meetings</h2>
-        <ul id="meetingList"></ul>
+        <div class="card-header">
+          <div class="card-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+            <i class="fas fa-calendar-check"></i>
+          </div>
+          <div>
+            <h2><i class="fas fa-list-check"></i> Created Meetings</h2>
+            <p class="card-description">Overview of all scheduled meetings</p>
+          </div>
+        </div>
+        
+        <div class="filter-section">
+          <h3><i class="fas fa-filter"></i> Filter Meetings</h3>
+          <div class="filter-grid">
+            <div class="input-group">
+              <i class="fas fa-heading input-icon"></i>
+              <input type="text" id="filterMeetingName" placeholder="Filter by Meeting Name" />
+            </div>
+            <div class="input-group">
+              <i class="fas fa-user-injured input-icon"></i>
+              <input type="text" id="filterPatientName" placeholder="Filter by Patient Name" />
+            </div>
+            <div class="input-group">
+              <i class="fas fa-id-card input-icon"></i>
+              <input type="text" id="filterMRN" placeholder="Filter by MRN" />
+            </div>
+          </div>
+          <button type="button" id="clearFiltersBtn" class="btn-secondary">
+            <i class="fas fa-times-circle"></i> Clear Filters
+          </button>
+        </div>
+        
+        <ul id="meetingList" class="fancy-list meetings-list"></ul>
       </section>
 
-      <p id="message"></p>
+      <div id="message" class="message-alert"></div>
     </main>
 
     <script src="app.js"></script>

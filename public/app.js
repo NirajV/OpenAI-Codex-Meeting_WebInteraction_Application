@@ -7,12 +7,22 @@ const memberList = document.getElementById('memberList');
 const patientDetailsList = document.getElementById('patientDetailsList');
 const meetingList = document.getElementById('meetingList');
 const memberTeams = document.getElementById('memberTeams');
-const inviteeCheckboxes = document.getElementById('inviteeCheckboxes');
+const inviteeEmail = document.getElementById('inviteeEmail');
+const emailSuggestions = document.getElementById('emailSuggestions');
 const patientMeetingId = document.getElementById('patientMeetingId');
+const patientAttachments = document.getElementById('patientAttachments');
 const message = document.getElementById('message');
 const scheduleType = document.getElementById('scheduleType');
 const recurringFields = document.getElementById('recurringFields');
-const meetingAttachments = document.getElementById('meetingAttachments');
+
+// Filter elements
+const filterMeetingName = document.getElementById('filterMeetingName');
+const filterPatientName = document.getElementById('filterPatientName');
+const filterMRN = document.getElementById('filterMRN');
+const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+
+// Store all meetings data
+let allMeetings = [];
 
 const showMessage = (text, isError = false) => {
   message.textContent = text;
@@ -56,33 +66,98 @@ const refreshMembers = async () => {
   memberList.innerHTML = members
     .map((member) => `<li>${member.fullName} (${member.email}) - Teams: ${member.teams || 'None'}</li>`)
     .join('');
-
-  inviteeCheckboxes.innerHTML = members
-    .map(
-      (member) => `<label><input type="checkbox" value="${member.id}" /> ${member.fullName} (${member.email})</label>`
-    )
-    .join('');
 };
 
 const refreshMeetings = async () => {
   const meetings = await fetchJSON('/api/meetings');
+  allMeetings = meetings;
+  renderMeetings(meetings);
 
-  meetingList.innerHTML = meetings
-    .map(
-      (meeting) =>
-        `<li><strong>#${meeting.id} ${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt}` +
-        `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
-        `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
-        `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
-        `<br/>Attach documentation / image / scan report: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
-        `<br/>Invitees: ${meeting.invitees || 'None'}` +
-        `<br/>Patient linked: ${meeting.patientName ? `${meeting.patientName} (MRN: ${meeting.medicalRecordNumber})` : 'Not linked yet'}</li>`
-    )
+  // Populate email suggestions from all unique invitee emails
+  const uniqueEmails = new Set();
+  meetings.forEach((meeting) => {
+    if (meeting.invitees) {
+      // Extract emails from invitees string
+      const emailMatches = meeting.invitees.match(/[\w.-]+@[\w.-]+\.\w+/g);
+      if (emailMatches) {
+        emailMatches.forEach(email => uniqueEmails.add(email));
+      }
+    }
+  });
+  emailSuggestions.innerHTML = Array.from(uniqueEmails)
+    .map((email) => `<option value="${email}">`)
     .join('');
 
   patientMeetingId.innerHTML =
     '<option value="">Select meeting</option>' +
     meetings.map((meeting) => `<option value="${meeting.id}">#${meeting.id} - ${meeting.name}</option>`).join('');
+};
+
+const renderMeetings = (meetings, nameFilter = '', patientFilter = '', mrnFilter = '') => {
+  meetingList.innerHTML = meetings
+    .map(
+      (meeting) => {
+        // If filters are applied, show only matching patients
+        let patientsToShow = meeting.patients || [];
+        
+        if (patientFilter || mrnFilter) {
+          patientsToShow = patientsToShow.filter((patient) => {
+            const patientNameMatch = !patientFilter || patient.patientName.toLowerCase().includes(patientFilter.toLowerCase());
+            const mrnMatch = !mrnFilter || patient.medicalRecordNumber.toLowerCase().includes(mrnFilter.toLowerCase());
+            return patientNameMatch && mrnMatch;
+          });
+        }
+
+        const patientsHtml = patientsToShow && patientsToShow.length > 0
+          ? patientsToShow
+              .map(
+                (p) =>
+                  `<br/>&nbsp;&nbsp;<i class="fas fa-user-injured"></i> ${p.patientName} (MRN: ${p.medicalRecordNumber}) | Dr. ${p.doctorName} | ${p.departmentName}`
+              )
+              .join('')
+          : '<br/>&nbsp;&nbsp;<i class="fas fa-exclamation-circle"></i> No patients added yet';
+        return (
+          `<li><strong>#${meeting.id} ${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt}` +
+          `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
+          `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
+          `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
+          `<br/>Attachments: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
+          `<br/>Invitees: ${meeting.invitees || 'None'}` +
+          `<br/><strong>Patients:</strong>${patientsHtml}</li>`
+        );
+      }
+    )
+    .join('');
+};
+
+const applyMeetingFilters = () => {
+  const nameFilter = filterMeetingName.value.toLowerCase().trim();
+  const patientFilter = filterPatientName.value.toLowerCase().trim();
+  const mrnFilter = filterMRN.value.toLowerCase().trim();
+
+  const filtered = allMeetings.filter((meeting) => {
+    // Filter by meeting name
+    if (nameFilter && !meeting.name.toLowerCase().includes(nameFilter)) {
+      return false;
+    }
+
+    // Filter by patient name and/or MRN (if no patients match, exclude this meeting)
+    if (patientFilter || mrnFilter) {
+      const hasMatchingPatient = meeting.patients && meeting.patients.some((patient) => {
+        const patientNameMatch = !patientFilter || patient.patientName.toLowerCase().includes(patientFilter);
+        const mrnMatch = !mrnFilter || patient.medicalRecordNumber.toLowerCase().includes(mrnFilter);
+        return patientNameMatch && mrnMatch;
+      });
+
+      if (!hasMatchingPatient) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  renderMeetings(filtered, nameFilter, patientFilter, mrnFilter);
 };
 
 const refreshPatientDetails = async () => {
@@ -138,18 +213,9 @@ memberForm.addEventListener('submit', async (event) => {
 
 meetingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const inviteeIds = [...inviteeCheckboxes.querySelectorAll('input:checked')].map((checkbox) => Number(checkbox.value));
+  const email = inviteeEmail.value.trim();
 
   try {
-    const attachmentFiles = [...meetingAttachments.files];
-    const attachments = await Promise.all(
-      attachmentFiles.map(async (file) => ({
-        fileName: file.name,
-        fileType: file.type || null,
-        fileData: await toBase64(file),
-      }))
-    );
-
     const payload = {
       name: document.getElementById('meetingName').value,
       startsAt: document.getElementById('startsAt').value,
@@ -159,8 +225,7 @@ meetingForm.addEventListener('submit', async (event) => {
       scheduleType: scheduleType.value,
       recurrenceRule: document.getElementById('recurrenceRule').value || null,
       recurrenceEndDate: document.getElementById('recurrenceEndDate').value || null,
-      attachments,
-      inviteeIds,
+      inviteeEmail: email || null,
     };
 
     await fetchJSON('/api/meetings', {
@@ -181,10 +246,26 @@ patientDetailsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
   try {
+    const meetingIdValue = patientMeetingId.value ? Number(patientMeetingId.value) : null;
+    
+    if (!meetingIdValue) {
+      showMessage('Please select a meeting.', true);
+      return;
+    }
+
+    const attachmentFiles = [...patientAttachments.files];
+    const attachments = await Promise.all(
+      attachmentFiles.map(async (file) => ({
+        fileName: file.name,
+        fileType: file.type || null,
+        fileData: await toBase64(file),
+      }))
+    );
+
     await fetchJSON('/api/patient-details', {
       method: 'POST',
       body: JSON.stringify({
-        meetingId: Number(patientMeetingId.value),
+        meetingId: meetingIdValue,
         medicalRecordNumber: document.getElementById('medicalRecordNumber').value,
         patientName: document.getElementById('patientName').value,
         patientDateOfBirth: document.getElementById('patientDateOfBirth').value,
@@ -192,12 +273,13 @@ patientDetailsForm.addEventListener('submit', async (event) => {
         doctorName: document.getElementById('doctorName').value,
         departmentName: document.getElementById('departmentName').value,
         meetingAgendaNote: document.getElementById('meetingAgendaNote').value || null,
+        attachments,
       }),
     });
 
     patientDetailsForm.reset();
     await Promise.all([refreshPatientDetails(), refreshMeetings()]);
-    showMessage('Patient details linked to meeting successfully.');
+    showMessage('Patient added to meeting successfully!');
   } catch (error) {
     showMessage(error.message, true);
   }
@@ -209,6 +291,18 @@ scheduleType.addEventListener('change', () => {
   } else {
     recurringFields.classList.add('hidden');
   }
+});
+
+// Filter event listeners
+filterMeetingName.addEventListener('input', applyMeetingFilters);
+filterPatientName.addEventListener('input', applyMeetingFilters);
+filterMRN.addEventListener('input', applyMeetingFilters);
+
+clearFiltersBtn.addEventListener('click', () => {
+  filterMeetingName.value = '';
+  filterPatientName.value = '';
+  filterMRN.value = '';
+  renderMeetings(allMeetings);
 });
 
 const init = async () => {
