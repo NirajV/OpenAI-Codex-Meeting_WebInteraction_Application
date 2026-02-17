@@ -33,3 +33,20 @@ python app.py
 ```
 
 Then open `http://localhost:3000`.
+
+## Email Invites (SMTP)
+To send meeting invite emails, configure these environment variables (e.g., in `.env`):
+
+```bash
+EMAIL_ENABLED=true
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=niraj.k.vishwakarma@gmail.com
+SMTP_PASSWORD=ynqv ocdz zauh iirc
+SMTP_FROM=niraj.k.vishwakarma@gmail.com
+SMTP_USE_TLS=true
+```
+
+Notes:
+- Gmail requires an app password if 2FA is enabled.
+- If `EMAIL_ENABLED` is true and SMTP settings are missing, meeting creation will return an error.

@@ -44,11 +44,11 @@ CREATE TABLE IF NOT EXISTS meeting_schedules (
 );
 
 CREATE TABLE IF NOT EXISTS meeting_invites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
   meeting_id INT NOT NULL,
-  email VARCHAR(255) NOT NULL,
+  emails VARCHAR(2000) NOT NULL,
   invited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   status ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
-  PRIMARY KEY (meeting_id, email),
   FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
 );
 

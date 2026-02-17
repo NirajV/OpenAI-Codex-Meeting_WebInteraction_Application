@@ -1,24 +1,123 @@
 import base64
 import json
 import os
+import re
+import smtplib
 from datetime import datetime
+from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 import mysql.connector
 
-BASE_DIR = Path(__file__).resolve().parent
-PUBLIC_DIR = BASE_DIR / "public"
-DB_DIR = BASE_DIR / "db"
-SCHEMA_PATH = DB_DIR / "schema.sql"
-
+# Load environment variables at the very start
 try:
     from dotenv import load_dotenv
-
+    BASE_DIR = Path(__file__).resolve().parent
     load_dotenv(BASE_DIR / ".env")
 except Exception:
     pass
+
+PUBLIC_DIR = BASE_DIR / "public"
+DB_DIR = BASE_DIR / "db"
+SCHEMA_PATH = DB_DIR / "schema.sql"
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _parse_bool(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+EMAIL_ENABLED = _parse_bool(os.environ.get("EMAIL_ENABLED"), False)
+
+
+def _get_smtp_settings():
+    return {
+        "host": os.environ.get("SMTP_HOST"),
+        "port": int(os.environ.get("SMTP_PORT", "587")),
+        "user": os.environ.get("SMTP_USER"),
+        "password": os.environ.get("SMTP_PASSWORD"),
+        "from": os.environ.get("SMTP_FROM") or os.environ.get("SMTP_USER"),
+        "use_tls": _parse_bool(os.environ.get("SMTP_USE_TLS"), True),
+    }
+
+
+def _validate_smtp_settings(settings):
+    missing = []
+    if not settings["host"]:
+        missing.append("SMTP_HOST")
+    if not settings["port"]:
+        missing.append("SMTP_PORT")
+    if not settings["user"]:
+        missing.append("SMTP_USER")
+    if not settings["password"]:
+        missing.append("SMTP_PASSWORD")
+    if not settings["from"]:
+        missing.append("SMTP_FROM")
+    return missing
+
+
+def send_invite_emails(invitees, meeting_payload):
+    """Send meeting invite emails via SMTP.
+    
+    Args:
+        invitees: List of email addresses
+        meeting_payload: Dict with meeting details
+        
+    Returns:
+        Tuple (success: bool, message: str)
+    """
+    settings = _get_smtp_settings()
+    missing = _validate_smtp_settings(settings)
+    if missing:
+        return False, f"Missing SMTP settings: {', '.join(missing)}"
+
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = f"Meeting Invite: {meeting_payload['name']}"
+        msg["From"] = settings["from"]
+        msg["To"] = ", ".join(invitees)
+        msg.set_content(
+            "\n".join(
+                [
+                    "You are invited to a meeting.",
+                    "",
+                    f"Meeting: {meeting_payload['name']}",
+                    f"Meeting ID: {meeting_payload['id']}",
+                    f"Date: {meeting_payload['startsAt']}",
+                    f"Time: {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload['timezone']})",
+                    f"Schedule: {meeting_payload['scheduleType']}",
+                    f"Recurrence: {meeting_payload.get('recurrenceRule') or 'N/A'}",
+                    f"Recurrence End: {meeting_payload.get('recurrenceEndDate') or 'N/A'}",
+                ]
+            )
+        )
+
+        # Try SSL first (port 465), then TLS (port 587)
+        port = settings["port"]
+        if port == 465:
+            # Use implicit SSL
+            with smtplib.SMTP_SSL(settings["host"], port, timeout=10) as server:
+                server.login(settings["user"], settings["password"])
+                server.send_message(msg)
+        else:
+            # Use explicit TLS (port 587 or others)
+            with smtplib.SMTP(settings["host"], port, timeout=10) as server:
+                if settings["use_tls"]:
+                    server.starttls()
+                server.login(settings["user"], settings["password"])
+                server.send_message(msg)
+        
+        return True, "Emails sent successfully"
+    except smtplib.SMTPAuthenticationError:
+        return False, "SMTP authentication failed. Check SMTP_USER and SMTP_PASSWORD."
+    except smtplib.SMTPException as e:
+        return False, f"SMTP error: {str(e)}"
+    except Exception as e:
+        return False, f"Failed to send emails: {str(e)}"
 
 
 def get_db_connection():
@@ -121,7 +220,7 @@ class AppHandler(BaseHTTPRequestHandler):
                                     ORDER BY mpd.patient_name SEPARATOR '||') AS patientsData,
                        COUNT(DISTINCT ma.id) AS attachmentCount,
                        GROUP_CONCAT(DISTINCT ma.file_name ORDER BY ma.file_name SEPARATOR ', ') AS attachmentNames,
-                       GROUP_CONCAT(DISTINCT mi.email ORDER BY mi.email SEPARATOR '; ') AS invitees,
+                       GROUP_CONCAT(DISTINCT mi.emails SEPARATOR '; ') AS invitees,
                        ms.starts_at AS startsAt,
                        ms.start_time AS startTime,
                        ms.end_time AS endTime,
@@ -260,6 +359,21 @@ class AppHandler(BaseHTTPRequestHandler):
                 recurrence_end = data.get("recurrenceEndDate") or None
                 invitee_email = (data.get("inviteeEmail") or "").strip() or None
 
+                invitee_emails = None
+                if invitee_email:
+                    raw_emails = [email.strip().lower() for email in invitee_email.split(",") if email.strip()]
+                    unique_emails = []
+                    seen = set()
+                    for email in raw_emails:
+                        if email not in seen:
+                            seen.add(email)
+                            unique_emails.append(email)
+                    invalid_emails = [email for email in unique_emails if not EMAIL_RE.match(email)]
+                    if invalid_emails:
+                        self._send_json({"error": f"Invalid invitee email(s): {', '.join(invalid_emails)}"}, 400)
+                        return
+                    invitee_emails = ", ".join(unique_emails) if unique_emails else None
+
                 if not name or not starts_at or not schedule_type or not start_time or not end_time:
                     self._send_json(
                         {
@@ -274,6 +388,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 if schedule_type == "recurring" and not recurrence_rule:
                     self._send_json({"error": "Recurrence rule is required for recurring meetings."}, 400)
                     return
+
+                if EMAIL_ENABLED and invitee_email:
+                    settings = _get_smtp_settings()
+                    missing = _validate_smtp_settings(settings)
+                    if missing:
+                        self._send_json({"error": f"Email enabled but missing SMTP settings: {', '.join(missing)}"}, 500)
+                        return
 
                 datetime.fromisoformat(starts_at)
                 parsed_start_time = datetime.strptime(start_time, "%H:%M")
@@ -305,17 +426,60 @@ class AppHandler(BaseHTTPRequestHandler):
                         ),
                     )
 
-                    if invitee_email:
+                    if invitee_emails:
                         cursor.execute(
-                            "INSERT INTO meeting_invites (meeting_id, email) VALUES (%s, %s)",
-                            (meeting_id, invitee_email),
+                            "INSERT INTO meeting_invites (meeting_id, emails) VALUES (%s, %s)",
+                            (meeting_id, invitee_emails),
                         )
 
+                        # Send invite emails if enabled
+                    email_error = None
+                    email_success = False
+                    if EMAIL_ENABLED and invitee_emails:
+                        # Parse email list (handle both ", " and "," separators)
+                        email_list = [e.strip() for e in invitee_emails.replace(", ", ",").split(",") if e.strip()]
+                        print(f"[EMAIL DEBUG] Sending invites to: {email_list}")
+                        success, msg = send_invite_emails(
+                            email_list,
+                            {
+                                "id": meeting_id,
+                                "name": name,
+                                "startsAt": starts_at,
+                                "startTime": start_time,
+                                "endTime": end_time,
+                                "timezone": timezone,
+                                "scheduleType": schedule_type,
+                                "recurrenceRule": recurrence_rule,
+                                "recurrenceEndDate": recurrence_end,
+                            },
+                        )
+                        if success:
+                            print(f"[EMAIL SUCCESS] Emails sent successfully: {msg}")
+                            email_success = True
+                        else:
+                            print(f"[EMAIL ERROR] {msg}")
+                            email_error = msg
+                    elif not EMAIL_ENABLED:
+                        print("[EMAIL DEBUG] EMAIL_ENABLED is False, skipping email")
+                    else:
+                        print("[EMAIL DEBUG] No invitee emails provided")
+
                     conn.commit()
+                    
+                    # Warn if email failed but meeting was created
+                    response = {"id": meeting_id, "name": name}
+                    if email_success:
+                        response["email_status"] = "Invitation emails sent successfully"
+                    elif email_error:
+                        response["warning"] = f"Meeting created but email sending failed: {email_error}"
+                    elif EMAIL_ENABLED and not invitee_emails:
+                        response["note"] = "No invitee emails provided, no invitations sent"
+                    elif not EMAIL_ENABLED:
+                        response["note"] = "EMAIL_ENABLED is false, invitations were not sent"
+                    
+                    self._send_json(response, 201)
                 finally:
                     conn.close()
-
-                self._send_json({"message": "Meeting created successfully.", "meetingId": meeting_id}, 201)
                 return
 
             if parsed.path == "/api/patient-details":

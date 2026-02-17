@@ -29,6 +29,25 @@ const showMessage = (text, isError = false) => {
   message.style.color = isError ? '#b91c1c' : '#047857';
 };
 
+const parseInviteeEmails = (raw) => {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) {
+    return { emails: [], invalid: [] };
+  }
+  const parts = trimmed.split(',').map((part) => part.trim()).filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+  parts.forEach((email) => {
+    const normalized = email.toLowerCase();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      unique.push(normalized);
+    }
+  });
+  const invalid = unique.filter((email) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email));
+  return { emails: unique, invalid };
+};
+
 const toBase64 = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -213,7 +232,12 @@ memberForm.addEventListener('submit', async (event) => {
 
 meetingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const email = inviteeEmail.value.trim();
+  const emailInput = inviteeEmail.value;
+  const { emails, invalid } = parseInviteeEmails(emailInput);
+  if (invalid.length > 0) {
+    showMessage(`Invalid email(s): ${invalid.join(', ')}`, true);
+    return;
+  }
 
   try {
     const payload = {
@@ -225,7 +249,7 @@ meetingForm.addEventListener('submit', async (event) => {
       scheduleType: scheduleType.value,
       recurrenceRule: document.getElementById('recurrenceRule').value || null,
       recurrenceEndDate: document.getElementById('recurrenceEndDate').value || null,
-      inviteeEmail: email || null,
+      inviteeEmail: emails.length > 0 ? emails.join(', ') : null,
     };
 
     await fetchJSON('/api/meetings', {
