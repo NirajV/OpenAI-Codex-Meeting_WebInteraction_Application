@@ -25,6 +25,7 @@ erDiagram
 
     meeting_patient_details {
         INT id PK
+        INT meeting_id FK
         VARCHAR medical_record_number
         VARCHAR patient_name
         DATE patient_date_of_birth
@@ -39,13 +40,15 @@ erDiagram
         INT id PK
         VARCHAR name
         TEXT organizer_note
-        INT patient_detail_id FK
         DATETIME created_at
     }
 
     meeting_attachments {
         INT id PK
         INT meeting_id FK
+        VARCHAR medical_record_number
+        VARCHAR doctor_name
+        VARCHAR department_name
         VARCHAR file_name
         VARCHAR file_type
         BIGINT file_size
@@ -67,29 +70,41 @@ erDiagram
     }
 
     meeting_invites {
-        INT meeting_id PK, FK
-        INT member_id PK, FK
+        INT id PK
+        INT meeting_id FK
+        VARCHAR emails
         DATETIME invited_at
         ENUM status
+    }
+
+    meeting_invitee_responses {
+        INT id PK
+        INT meeting_id FK
+        VARCHAR invitee_email
+        VARCHAR response_token UK
+        ENUM status
+        DATETIME responded_at
+        DATETIME created_at
     }
 
     teams ||--o{ team_members : has
     members ||--o{ team_members : belongs_to
 
     meetings ||--|| meeting_schedules : scheduled_as
-    meetings ||--o| meeting_patient_details : linked_to
-    meetings ||--o{ meeting_attachments : contains
+    meetings ||--o{ meeting_patient_details : includes
+    meeting_patient_details ||--o{ meeting_attachments : stores
     meetings ||--o{ meeting_invites : invites
-    members ||--o{ meeting_invites : receives
+    meetings ||--o{ meeting_invitee_responses : tracks
 ```
 
 ## Relationship Summary
 
 - **teams ↔ members**: many-to-many through `team_members`.
 - **meetings ↔ meeting_schedules**: one-to-one through `meeting_schedules.meeting_id` (unique foreign key).
-- **meetings ↔ meeting_patient_details**: one-to-one optional relationship. A meeting can optionally reference patient details via `patient_detail_id`. Patient details can exist independently and be linked to a meeting later.
-- **meetings ↔ meeting_attachments**: one-to-many. A meeting can have multiple file attachments (documents, images, scan reports).
-- **meetings ↔ members**: many-to-many through `meeting_invites`.
+- **meetings ↔ meeting_patient_details**: one-to-many. A meeting can have multiple patient detail rows.
+- **meeting_patient_details ↔ meeting_attachments**: one-to-many through the composite foreign key on patient details.
+- **meetings ↔ meeting_invites**: one-to-many. A meeting stores its invited email list in `meeting_invites`.
+- **meetings ↔ meeting_invitee_responses**: one-to-many. Tracks per-invitee response tokens and RSVP status.
 
 ## Table Descriptions
 
@@ -103,8 +118,9 @@ erDiagram
 
 - **meetings**: Core meeting entity with name and optional organizer notes.
 - **meeting_schedules**: Scheduling information for each meeting (date, time, timezone, recurrence).
-- **meeting_invites**: Many-to-many relationship between meetings and members with invitation status.
-- **meeting_attachments**: File attachments for meetings stored as binary data (LONGBLOB).
+- **meeting_invites**: Stores invited email list per meeting and overall invite status.
+- **meeting_invitee_responses**: Per-invitee response tokens and RSVP status.
+- **meeting_attachments**: File attachments for meetings stored as binary data (LONGBLOB), linked to patient details.
 
 ### Medical/Patient Tables
 
@@ -112,14 +128,15 @@ erDiagram
 
 ## Notes
 
-- Junction tables (`team_members`, `meeting_invites`) use composite primary keys to prevent duplicate mappings.
+- Junction tables (`team_members`) use composite primary keys to prevent duplicate mappings.
 - Cascading deletes are enabled on foreign keys:
   - Deleting a team removes all `team_members` associations.
-  - Deleting a member removes all `team_members` and `meeting_invites` associations.
-  - Deleting a meeting removes all `meeting_schedules`, `meeting_attachments`, and `meeting_invites`.
-  - Deleting patient details sets `patient_detail_id` to NULL in linked meetings (ON DELETE SET NULL).
+    - Deleting a member removes all `team_members` associations.
+    - Deleting a meeting removes all `meeting_schedules`, `meeting_patient_details`, `meeting_attachments`, `meeting_invites`, and `meeting_invitee_responses`.
+    - Deleting patient details removes linked `meeting_attachments` rows via the composite foreign key.
 - **ENUM constraints**:
   - `meeting_schedules.schedule_type`: `one-time` or `recurring`
-  - `meeting_invites.status`: `pending`, `accepted`, or `declined`
-- **Patient details** can be created independently without linking to a meeting, allowing flexible workflow where patient information is entered first and meetings scheduled later.
+    - `meeting_invites.status`: `Pending`, `Accept`, `Decline`, or `Tentative`
+    - `meeting_invitee_responses.status`: `Pending`, `Accept`, `Decline`, or `Tentative`
+- **Patient details** are scoped to a meeting via `meeting_patient_details.meeting_id` with uniqueness enforced per meeting, medical record number, doctor, and department.
 - **File attachments** are stored directly in the database as binary data (LONGBLOB) with metadata including file name, type, and size.

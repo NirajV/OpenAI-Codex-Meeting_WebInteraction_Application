@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import re
+import secrets
 import smtplib
 from datetime import datetime
 from email.message import EmailMessage
@@ -12,9 +13,9 @@ from urllib.parse import urlparse
 import mysql.connector
 
 # Load environment variables at the very start
+BASE_DIR = Path(__file__).resolve().parent
 try:
     from dotenv import load_dotenv
-    BASE_DIR = Path(__file__).resolve().parent
     load_dotenv(BASE_DIR / ".env")
 except Exception:
     pass
@@ -60,12 +61,13 @@ def _validate_smtp_settings(settings):
     return missing
 
 
-def send_invite_emails(invitees, meeting_payload):
-    """Send meeting invite emails via SMTP.
+def send_invite_emails(invitees_with_tokens, meeting_payload, base_url="http://localhost:3000"):
+    """Send meeting invite emails via SMTP with action buttons.
     
     Args:
-        invitees: List of email addresses
+        invitees_with_tokens: Dict mapping email -> response_token
         meeting_payload: Dict with meeting details
+        base_url: Base URL for action links
         
     Returns:
         Tuple (success: bool, message: str)
@@ -76,40 +78,238 @@ def send_invite_emails(invitees, meeting_payload):
         return False, f"Missing SMTP settings: {', '.join(missing)}"
 
     try:
-        msg = EmailMessage()
-        msg["Subject"] = f"Meeting Invite: {meeting_payload['name']}"
-        msg["From"] = settings["from"]
-        msg["To"] = ", ".join(invitees)
-        msg.set_content(
-            "\n".join(
-                [
-                    "You are invited to a meeting.",
-                    "",
-                    f"Meeting: {meeting_payload['name']}",
-                    f"Meeting ID: {meeting_payload['id']}",
-                    f"Date: {meeting_payload['startsAt']}",
-                    f"Time: {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload['timezone']})",
-                    f"Schedule: {meeting_payload['scheduleType']}",
-                    f"Recurrence: {meeting_payload.get('recurrenceRule') or 'N/A'}",
-                    f"Recurrence End: {meeting_payload.get('recurrenceEndDate') or 'N/A'}",
-                ]
-            )
-        )
+        for invitee_email, token in invitees_with_tokens.items():
+            # Create action links
+            accept_link = f"{base_url}/api/respond-to-meeting/{token}?action=accept"
+            decline_link = f"{base_url}/api/respond-to-meeting/{token}?action=decline"
+            tentative_link = f"{base_url}/api/respond-to-meeting/{token}?action=tentative"
+            
+            msg = EmailMessage()
+            msg["Subject"] = f"Meeting Invite: {meeting_payload['name']}"
+            msg["From"] = settings["from"]
+            msg["To"] = invitee_email
+            
+            # Plain text version (fallback)
+            plain_text = f"""You are invited to a meeting.
 
-        # Try SSL first (port 465), then TLS (port 587)
-        port = settings["port"]
-        if port == 465:
-            # Use implicit SSL
-            with smtplib.SMTP_SSL(settings["host"], port, timeout=10) as server:
-                server.login(settings["user"], settings["password"])
-                server.send_message(msg)
-        else:
-            # Use explicit TLS (port 587 or others)
-            with smtplib.SMTP(settings["host"], port, timeout=10) as server:
-                if settings["use_tls"]:
-                    server.starttls()
-                server.login(settings["user"], settings["password"])
-                server.send_message(msg)
+Meeting: {meeting_payload['name']}
+Meeting ID: {meeting_payload['id']}
+Date: {meeting_payload['startsAt']}
+Time: {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload['timezone']})
+Schedule: {meeting_payload['scheduleType']}
+Recurrence: {meeting_payload.get('recurrenceRule') or 'N/A'}
+Recurrence End: {meeting_payload.get('recurrenceEndDate') or 'N/A'}
+
+--- RESPOND TO THIS INVITATION ---
+
+ACCEPT:    {accept_link}
+DECLINE:   {decline_link}
+TENTATIVE: {tentative_link}
+
+---
+Please click the appropriate link or button to respond to this meeting invitation.
+"""
+            
+            # HTML version with styled buttons
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            background-color: #ffffff;
+            padding: 30px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }}
+        .meeting-details {{
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            margin: 20px 0;
+            border-radius: 4px;
+        }}
+        .detail-row {{
+            margin: 8px 0;
+            padding: 5px 0;
+        }}
+        .detail-label {{
+            font-weight: bold;
+            color: #2c3e50;
+            min-width: 120px;
+            display: inline-block;
+        }}
+        .button-container {{
+            display: flex;
+            gap: 15px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+            justify-content: center;
+        }}
+        .button {{
+            display: inline-block;
+            padding: 14px 28px;
+            margin: 10px 5px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s ease;
+            text-align: center;
+            min-width: 140px;
+        }}
+        .button-accept {{
+            background-color: #27ae60;
+            color: white;
+        }}
+        .button-accept:hover {{
+            background-color: #229954;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }}
+        .button-decline {{
+            background-color: #e74c3c;
+            color: white;
+        }}
+        .button-decline:hover {{
+            background-color: #c0392b;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }}
+        .button-tentative {{
+            background-color: #f39c12;
+            color: white;
+        }}
+        .button-tentative:hover {{
+            background-color: #d68910;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }}
+        .status-legend {{
+            background-color: #f0f8ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #3498db;
+        }}
+        .status-legend-item {{
+            margin: 8px 0;
+            font-size: 14px;
+        }}
+        .footer {{
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #7f8c8d;
+            font-size: 12px;
+            margin-top: 30px;
+        }}
+        .icon {{
+            margin-right: 5px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>You Have Been Invited to a Meeting</h1>
+        
+        <div class="meeting-details">
+            <div class="detail-row">
+                <span class="detail-label">Meeting Name:</span> {meeting_payload['name']}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Meeting ID:</span> {meeting_payload['id']}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Date:</span> {meeting_payload['startsAt']}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Time:</span> {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload['timezone']})
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Schedule:</span> {meeting_payload['scheduleType']}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Recurrence:</span> {meeting_payload.get('recurrenceRule') or 'N/A'}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Ends:</span> {meeting_payload.get('recurrenceEndDate') or 'N/A'}
+            </div>
+        </div>
+
+        <h2 style="color: #2c3e50; margin-top: 30px;">Please Respond to this Invitation</h2>
+        
+        <p style="text-align: center; color: #555; margin: 20px 0;">
+            Click the appropriate button below to let us know if you can attend:
+        </p>
+        
+        <div class="button-container">
+            <a href="{accept_link}" class="button button-accept" style="color: white;">
+                <span class="icon">✓</span> Accept
+            </a>
+            <a href="{tentative_link}" class="button button-tentative" style="color: white;">
+                <span class="icon">?</span> Tentative
+            </a>
+            <a href="{decline_link}" class="button button-decline" style="color: white;">
+                <span class="icon">✕</span> Decline
+            </a>
+        </div>
+
+        <div class="status-legend">
+            <strong>Your Response Options:</strong>
+            <div class="status-legend-item"><span class="icon">✓</span> <strong>Accept</strong> - I can attend this meeting</div>
+            <div class="status-legend-item"><span class="icon">?</span> <strong>Tentative</strong> - I might be able to attend</div>
+            <div class="status-legend-item"><span class="icon">✕</span> <strong>Decline</strong> - I cannot attend this meeting</div>
+        </div>
+
+        <p style="color: #7f8c8d; font-size: 14px; text-align: center; margin-top: 20px;">
+            Your response will be automatically recorded and displayed in the calendar.
+        </p>
+
+        <div class="footer">
+            <p>This is an automated message from Meeting Planner Pro.</p>
+            <p>If you have questions about this meeting, please contact the organizer.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+            
+            msg.set_content(plain_text)
+            msg.add_alternative(html_content, subtype='html')
+
+            # Try SSL first (port 465), then TLS (port 587)
+            port = settings["port"]
+            if port == 465:
+                # Use implicit SSL
+                with smtplib.SMTP_SSL(settings["host"], port, timeout=10) as server:
+                    server.login(settings["user"], settings["password"])
+                    server.send_message(msg)
+            else:
+                # Use explicit TLS (port 587 or others)
+                with smtplib.SMTP(settings["host"], port, timeout=10) as server:
+                    if settings["use_tls"]:
+                        server.starttls()
+                    server.login(settings["user"], settings["password"])
+                    server.send_message(msg)
         
         return True, "Emails sent successfully"
     except smtplib.SMTPAuthenticationError:
@@ -136,8 +336,9 @@ def initialize_db():
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        for _ in cursor.execute(schema_sql, multi=True):
-            pass
+        statements = [stmt.strip() for stmt in schema_sql.split(";") if stmt.strip()]
+        for statement in statements:
+            cursor.execute(statement)
         conn.commit()
     finally:
         conn.close()
@@ -156,6 +357,17 @@ class AppHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
         return json.loads(raw.decode("utf-8"))
+    
+    def _get_query_param(self, param_name, default=""):
+        """Extract query parameter from URL."""
+        parsed = urlparse(self.path)
+        params = {}
+        if parsed.query:
+            for part in parsed.query.split("&"):
+                if "=" in part:
+                    key, value = part.split("=", 1)
+                    params[key] = value
+        return params.get(param_name, default)
 
     def _serve_static(self, path):
         path = "/index.html" if path == "/" else path
@@ -179,6 +391,66 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+
+        # Handle meeting response links (accept/decline/tentative)
+        if parsed.path.startswith("/api/respond-to-meeting/"):
+            token = parsed.path.replace("/api/respond-to-meeting/", "").strip("/")
+            action = self._get_query_param("action", "").lower()
+            
+            if action not in ["accept", "decline", "tentative"]:
+                self._send_json({"error": "Invalid action. Must be accept, decline, or tentative."}, 400)
+                return
+            
+            # Map action to database ENUM values
+            status_map = {
+                "accept": "Accept",
+                "decline": "Decline",
+                "tentative": "Tentative"
+            }
+            db_status = status_map[action]
+            
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor(dictionary=True)
+                
+                # Find the invitee response record
+                cursor.execute(
+                    "SELECT id, meeting_id, invitee_email, status FROM meeting_invitee_responses WHERE response_token = %s",
+                    (token,)
+                )
+                response_record = cursor.fetchone()
+                
+                if not response_record:
+                    self._send_json({"error": "Invalid or expired response token."}, 404)
+                    return
+                
+                # Update the response status
+                cursor.execute(
+                    "UPDATE meeting_invitee_responses SET status = %s, responded_at = %s WHERE response_token = %s",
+                    (db_status, datetime.now(), token)
+                )
+                
+                # Get meeting details
+                cursor.execute(
+                    "SELECT name FROM meetings WHERE id = %s",
+                    (response_record['meeting_id'],)
+                )
+                meeting = cursor.fetchone()
+                
+                conn.commit()
+                
+                self._send_json({
+                    "success": True,
+                    "message": f"Your response ({action}) has been recorded successfully!",
+                    "meeting": meeting['name'] if meeting else "Unknown Meeting",
+                    "invitee_email": response_record['invitee_email'],
+                    "action": action
+                }, 200)
+            except Exception as e:
+                self._send_json({"error": f"Error processing response: {str(e)}"}, 500)
+            finally:
+                conn.close()
+            return
 
         if parsed.path == "/api/teams":
             conn = get_db_connection()
@@ -221,6 +493,7 @@ class AppHandler(BaseHTTPRequestHandler):
                        COUNT(DISTINCT ma.id) AS attachmentCount,
                        GROUP_CONCAT(DISTINCT ma.file_name ORDER BY ma.file_name SEPARATOR ', ') AS attachmentNames,
                        GROUP_CONCAT(DISTINCT mi.emails SEPARATOR '; ') AS invitees,
+                       GROUP_CONCAT(DISTINCT CONCAT(mir.invitee_email, '|', mir.status) ORDER BY mir.invitee_email SEPARATOR '||') AS inviteeResponses,
                        ms.starts_at AS startsAt,
                        ms.start_time AS startTime,
                        ms.end_time AS endTime,
@@ -233,6 +506,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 LEFT JOIN meeting_patient_details mpd ON mpd.meeting_id = me.id
                 LEFT JOIN meeting_attachments ma ON ma.meeting_id = me.id
                 LEFT JOIN meeting_invites mi ON mi.meeting_id = me.id
+                LEFT JOIN meeting_invitee_responses mir ON mir.meeting_id = me.id
                 GROUP BY me.id, me.name, ms.starts_at, ms.start_time, ms.end_time, ms.timezone,
                          ms.schedule_type, ms.recurrence_rule, ms.recurrence_end_date
                 ORDER BY ms.starts_at DESC, ms.start_time DESC
@@ -263,6 +537,19 @@ class AppHandler(BaseHTTPRequestHandler):
                                 })
                     processed_row['patients'] = patients
                     del processed_row['patientsData']
+                    
+                    # Parse invitee responses
+                    invitee_responses = {}
+                    if row['inviteeResponses']:
+                        for response_str in row['inviteeResponses'].split('||'):
+                            if '|' in response_str:
+                                email, status = response_str.rsplit('|', 1)
+                                if email not in invitee_responses:
+                                    invitee_responses[email] = status
+                    processed_row['responses'] = invitee_responses
+                    if 'inviteeResponses' in processed_row:
+                        del processed_row['inviteeResponses']
+                    
                     processed_rows.append(processed_row)
             finally:
                 conn.close()
@@ -432,15 +719,27 @@ class AppHandler(BaseHTTPRequestHandler):
                             (meeting_id, invitee_emails),
                         )
 
-                        # Send invite emails if enabled
+                    # Send invite emails if enabled
                     email_error = None
                     email_success = False
                     if EMAIL_ENABLED and invitee_emails:
                         # Parse email list (handle both ", " and "," separators)
                         email_list = [e.strip() for e in invitee_emails.replace(", ", ",").split(",") if e.strip()]
                         print(f"[EMAIL DEBUG] Sending invites to: {email_list}")
+                        
+                        # Generate tokens and store invitee responses
+                        invitees_with_tokens = {}
+                        for invitee_email in email_list:
+                            token = secrets.token_urlsafe(32)
+                            invitees_with_tokens[invitee_email] = token
+                            cursor.execute(
+                                "INSERT INTO meeting_invitee_responses (meeting_id, invitee_email, response_token) VALUES (%s, %s, %s)",
+                                (meeting_id, invitee_email, token),
+                            )
+                        
+                        # Send emails with action links
                         success, msg = send_invite_emails(
-                            email_list,
+                            invitees_with_tokens,
                             {
                                 "id": meeting_id,
                                 "name": name,

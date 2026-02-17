@@ -48,8 +48,20 @@ CREATE TABLE IF NOT EXISTS meeting_invites (
   meeting_id INT NOT NULL,
   emails VARCHAR(2000) NOT NULL,
   invited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  status ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
+  status ENUM('Pending', 'Accept', 'Decline', 'Tentative') NOT NULL DEFAULT 'Pending',
   FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS meeting_invitee_responses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  meeting_id INT NOT NULL,
+  invitee_email VARCHAR(255) NOT NULL,
+  response_token VARCHAR(255) NOT NULL UNIQUE,
+  status ENUM('Pending', 'Accept', 'Decline', 'Tentative') NOT NULL DEFAULT 'Pending',
+  responded_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_invitee_per_meeting (meeting_id, invitee_email)
 );
 
 CREATE TABLE IF NOT EXISTS meeting_patient_details (

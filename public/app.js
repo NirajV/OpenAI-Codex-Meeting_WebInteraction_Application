@@ -135,6 +135,36 @@ const renderMeetings = (meetings, nameFilter = '', patientFilter = '', mrnFilter
               )
               .join('')
           : '<br/>&nbsp;&nbsp;<i class="fas fa-exclamation-circle"></i> No patients added yet';
+        
+        // Format response status
+        let responseHtml = '';
+        if (meeting.responses && Object.keys(meeting.responses).length > 0) {
+          const responses = meeting.responses;
+          const counts = {
+            pending: 0,
+            accepted: 0,
+            declined: 0,
+            tentative: 0
+          };
+          
+          Object.values(responses).forEach(status => {
+            counts[status]++;
+          });
+          
+          responseHtml = `<br/><strong>RSVP Status:</strong> `;
+          if (counts.accepted > 0) responseHtml += `<span style="color: green;">✓ ${counts.accepted} Accepted</span> `;
+          if (counts.tentative > 0) responseHtml += `<span style="color: orange;">? ${counts.tentative} Tentative</span> `;
+          if (counts.declined > 0) responseHtml += `<span style="color: red;">✕ ${counts.declined} Declined</span> `;
+          if (counts.pending > 0) responseHtml += `<span style="color: gray;">⟳ ${counts.pending} Pending</span>`;
+          
+          responseHtml += '<br/>Details: ';
+          Object.entries(responses).forEach(([email, status]) => {
+            const statusIcon = status === 'accepted' ? '✓' : status === 'declined' ? '✕' : status === 'tentative' ? '?' : '⟳';
+            const statusColor = status === 'accepted' ? 'green' : status === 'declined' ? 'red' : status === 'tentative' ? 'orange' : 'gray';
+            responseHtml += `<span style="color: ${statusColor};">${statusIcon} ${email} (${status})</span> &nbsp;`;
+          });
+        }
+        
         return (
           `<li><strong>#${meeting.id} ${meeting.name}</strong> - ${meeting.scheduleType} at ${meeting.startsAt}` +
           `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
@@ -142,6 +172,7 @@ const renderMeetings = (meetings, nameFilter = '', patientFilter = '', mrnFilter
           `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
           `<br/>Attachments: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
           `<br/>Invitees: ${meeting.invitees || 'None'}` +
+          `${responseHtml}` +
           `<br/><strong>Patients:</strong>${patientsHtml}</li>`
         );
       }
