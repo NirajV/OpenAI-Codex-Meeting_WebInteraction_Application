@@ -65,6 +65,103 @@ def _validate_smtp_settings(settings):
     return missing
 
 
+def _escape_ics_text(value):
+    return (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\n", "\\n")
+    )
+
+
+def _get_est_meeting_range(meeting_payload):
+    starts_at_raw = meeting_payload["startsAt"]
+    start_time_raw = meeting_payload["startTime"]
+    end_time_raw = meeting_payload["endTime"]
+
+    starts_at = starts_at_raw.isoformat() if hasattr(starts_at_raw, "isoformat") else str(starts_at_raw)
+    starts_at = starts_at.split("T", 1)[0]
+
+    start_time = start_time_raw.isoformat() if hasattr(start_time_raw, "isoformat") else str(start_time_raw)
+    end_time = end_time_raw.isoformat() if hasattr(end_time_raw, "isoformat") else str(end_time_raw)
+    start_time = start_time[:5]
+    end_time = end_time[:5]
+
+    start_est = datetime.strptime(f"{starts_at} {start_time}", "%Y-%m-%d %H:%M").replace(tzinfo=EST_ZONE)
+    end_est = datetime.strptime(f"{starts_at} {end_time}", "%Y-%m-%d %H:%M").replace(tzinfo=EST_ZONE)
+    return start_est, end_est
+
+
+def build_calendar_links(meeting_payload, teams_join_url=None):
+    start_est, end_est = _get_est_meeting_range(meeting_payload)
+    start_utc = start_est.astimezone(dt_timezone.utc)
+    end_utc = end_est.astimezone(dt_timezone.utc)
+
+    location = teams_join_url or "Online Meeting"
+    details = f"Join meeting: {teams_join_url}" if teams_join_url else "Online meeting"
+
+    google_params = {
+        "action": "TEMPLATE",
+        "text": meeting_payload["name"],
+        "dates": f"{start_utc.strftime('%Y%m%dT%H%M%SZ')}/{end_utc.strftime('%Y%m%dT%H%M%SZ')}",
+        "ctz": "America/New_York",
+        "details": details,
+        "location": location,
+    }
+    google_url = f"https://calendar.google.com/calendar/render?{urlencode(google_params)}"
+
+    outlook_params = {
+        "path": "/calendar/action/compose",
+        "rru": "addevent",
+        "subject": meeting_payload["name"],
+        "startdt": start_est.isoformat(),
+        "enddt": end_est.isoformat(),
+        "location": location,
+        "body": details,
+    }
+    outlook_url = f"https://outlook.office.com/calendar/0/deeplink/compose?{urlencode(outlook_params)}"
+
+    return {
+        "google": google_url,
+        "outlook": outlook_url,
+    }
+
+
+def build_ics_content(meeting_payload, teams_join_url=None, organizer_email=None):
+    start_est, end_est = _get_est_meeting_range(meeting_payload)
+    meeting_id = meeting_payload.get("id") or secrets.token_hex(8)
+    dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    uid = f"meeting-{meeting_id}@meeting-planner-pro.local"
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Meeting Planner Pro//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:REQUEST",
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"DTSTAMP:{dtstamp}",
+        f"DTSTART;TZID=America/New_York:{start_est.strftime('%Y%m%dT%H%M%S')}",
+        f"DTEND;TZID=America/New_York:{end_est.strftime('%Y%m%dT%H%M%S')}",
+        f"SUMMARY:{_escape_ics_text(meeting_payload.get('name'))}",
+        f"LOCATION:{_escape_ics_text(teams_join_url or 'Online Meeting')}",
+        f"DESCRIPTION:{_escape_ics_text(f'Join link: {teams_join_url}' if teams_join_url else 'Online meeting')}",
+    ]
+
+    if organizer_email:
+        lines.append(f"ORGANIZER:MAILTO:{organizer_email}")
+
+    lines.extend([
+        "END:VEVENT",
+        "END:VCALENDAR",
+        "",
+    ])
+
+    return "\r\n".join(lines)
+
+
 def send_invite_emails(invitees_with_tokens, meeting_payload, base_url="http://localhost:3000"):
     """Send meeting invite emails via SMTP with action buttons.
     
@@ -84,7 +181,7 @@ def send_invite_emails(invitees_with_tokens, meeting_payload, base_url="http://l
     try:
         for invitee_email, token in invitees_with_tokens.items():
             # Create action links
-            accept_link = f"{base_url}/api/respond-to-meeting/{token}?action=accept"
+            accept_link = f"{base_url}/api/respond-to-meeting/{token}?action=accept&calendar=1"
             decline_link = f"{base_url}/api/respond-to-meeting/{token}?action=decline"
             tentative_link = f"{base_url}/api/respond-to-meeting/{token}?action=tentative"
             
@@ -329,6 +426,61 @@ Please click the appropriate link or button to respond to this meeting invitatio
         return False, f"Failed to send emails: {str(e)}"
 
 
+def send_calendar_invite_email(invitee_email, meeting_payload):
+    settings = _get_smtp_settings()
+    missing = _validate_smtp_settings(settings)
+    if missing:
+        return False, f"Missing SMTP settings: {', '.join(missing)}"
+
+    try:
+        teams_join_url = meeting_payload.get("teamsJoinUrl")
+        ics_content = build_ics_content(meeting_payload, teams_join_url, settings["from"])
+        ics_filename = f"meeting-{meeting_payload.get('id', 'invite')}-accepted.ics"
+
+        msg = EmailMessage()
+        msg["Subject"] = f"Calendar Invite: {meeting_payload['name']}"
+        msg["From"] = settings["from"]
+        msg["To"] = invitee_email
+
+        msg.set_content(
+            f"""You accepted the meeting invitation.
+
+Meeting: {meeting_payload['name']}
+Date: {meeting_payload['startsAt']}
+Time: {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload.get('timezone') or EST_TIMEZONE_LABEL})
+Microsoft Teams: {teams_join_url or 'N/A'}
+
+The calendar file is attached and should be added to your email calendar automatically in most clients.
+"""
+        )
+
+        msg.add_attachment(
+            ics_content.encode("utf-8"),
+            maintype="text",
+            subtype="calendar",
+            filename=ics_filename,
+            method="REQUEST",
+        )
+
+        port = settings["port"]
+        if port == 465:
+            with smtplib.SMTP_SSL(settings["host"], port, timeout=10) as server:
+                server.login(settings["user"], settings["password"])
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(settings["host"], port, timeout=10) as server:
+                if settings["use_tls"]:
+                    server.starttls()
+                server.login(settings["user"], settings["password"])
+                server.send_message(msg)
+
+        return True, "Calendar invite sent"
+    except smtplib.SMTPAuthenticationError:
+        return False, "SMTP authentication failed"
+    except Exception as error:
+        return False, f"Failed to send calendar invite: {str(error)}"
+
+
 def get_db_connection():
     return mysql.connector.connect(
         host=os.environ.get("DB_HOST", "127.0.0.1"),
@@ -398,6 +550,14 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _send_html(self, html, status=200):
+        payload = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
@@ -439,8 +599,53 @@ class AppHandler(BaseHTTPRequestHandler):
 
         # Handle meeting response links (accept/decline/tentative)
         if parsed.path.startswith("/api/respond-to-meeting/"):
-            token = parsed.path.replace("/api/respond-to-meeting/", "").strip("/")
+            token_path = parsed.path.replace("/api/respond-to-meeting/", "").strip("/")
+            if token_path.endswith(".ics"):
+                token = token_path[:-4]
+
+                conn = get_db_connection()
+                try:
+                    cursor = conn.cursor(dictionary=True)
+                    cursor.execute(
+                        """
+                        SELECT me.id, me.name,
+                               ms.starts_at AS startsAt,
+                               ms.start_time AS startTime,
+                               ms.end_time AS endTime,
+                               ms.timezone,
+                               ms.schedule_type AS scheduleType,
+                               ms.recurrence_rule AS recurrenceRule,
+                               ms.recurrence_end_date AS recurrenceEndDate,
+                               ms.teams_join_url AS teamsJoinUrl,
+                               mir.invitee_email AS inviteeEmail
+                        FROM meeting_invitee_responses mir
+                        JOIN meetings me ON me.id = mir.meeting_id
+                        JOIN meeting_schedules ms ON ms.meeting_id = me.id
+                        WHERE mir.response_token = %s
+                        """,
+                        (token,),
+                    )
+                    meeting = cursor.fetchone()
+                finally:
+                    conn.close()
+
+                if not meeting:
+                    self._send_json({"error": "Invalid or expired response token."}, 404)
+                    return
+
+                ics_content = build_ics_content(meeting, meeting.get("teamsJoinUrl"), _get_smtp_settings().get("from"))
+                payload = ics_content.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/calendar; charset=utf-8")
+                self.send_header("Content-Disposition", f"attachment; filename=meeting-{meeting['id']}-accepted.ics")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            token = token_path
             action = self._get_query_param("action", "").lower()
+            calendar_mode = self._get_query_param("calendar", "")
             
             if action not in ["accept", "decline", "tentative"]:
                 self._send_json({"error": "Invalid action. Must be accept, decline, or tentative."}, 400)
@@ -477,20 +682,76 @@ class AppHandler(BaseHTTPRequestHandler):
                 
                 # Get meeting details
                 cursor.execute(
-                    "SELECT name FROM meetings WHERE id = %s",
+                    """
+                    SELECT me.id, me.name,
+                           ms.starts_at AS startsAt,
+                           ms.start_time AS startTime,
+                           ms.end_time AS endTime,
+                           ms.timezone,
+                           ms.schedule_type AS scheduleType,
+                           ms.recurrence_rule AS recurrenceRule,
+                           ms.recurrence_end_date AS recurrenceEndDate,
+                           ms.teams_join_url AS teamsJoinUrl
+                    FROM meetings me
+                    JOIN meeting_schedules ms ON ms.meeting_id = me.id
+                    WHERE me.id = %s
+                    """,
                     (response_record['meeting_id'],)
                 )
                 meeting = cursor.fetchone()
                 
                 conn.commit()
+
+                calendar_note = None
+                if action == "accept" and meeting and response_record.get("status") != "Accept" and EMAIL_ENABLED:
+                    sent, message = send_calendar_invite_email(response_record['invitee_email'], meeting)
+                    calendar_note = message if sent else f"Accept recorded, but calendar invite failed: {message}"
+
+                if action == "accept" and calendar_mode in {"1", "true", "yes"} and meeting:
+                    calendar_links = build_calendar_links(meeting, meeting.get("teamsJoinUrl"))
+                    ics_url = f"/api/respond-to-meeting/{token}.ics"
+                    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"UTF-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+    <title>Meeting Accepted</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; background: #f5f7fb; margin: 0; padding: 24px; }}
+        .card {{ max-width: 640px; margin: 0 auto; background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }}
+        .btn {{ display: inline-block; margin: 8px 8px 0 0; padding: 10px 16px; border-radius: 6px; text-decoration: none; color: #fff; }}
+        .google {{ background: #1a73e8; }}
+        .outlook {{ background: #2563eb; }}
+        .ics {{ background: #059669; }}
+        .sub {{ color: #444; margin-top: 8px; }}
+    </style>
+</head>
+<body>
+    <div class=\"card\">
+        <h2>✅ Meeting accepted</h2>
+        <p class=\"sub\">Your RSVP is saved. Add this to your calendar now:</p>
+        <a class=\"btn google\" href=\"{calendar_links['google']}\" target=\"_blank\" rel=\"noopener noreferrer\">Add to Google Calendar</a>
+        <a class=\"btn outlook\" href=\"{calendar_links['outlook']}\" target=\"_blank\" rel=\"noopener noreferrer\">Add to Outlook Calendar</a>
+        <a class=\"btn ics\" href=\"{ics_url}\">Download .ics</a>
+        <p class=\"sub\">A calendar invite email has also been sent to {response_record['invitee_email']}.</p>
+    </div>
+</body>
+</html>
+"""
+                    self._send_html(html, 200)
+                    return
                 
-                self._send_json({
+                response_data = {
                     "success": True,
                     "message": f"Your response ({action}) has been recorded successfully!",
                     "meeting": meeting['name'] if meeting else "Unknown Meeting",
                     "invitee_email": response_record['invitee_email'],
                     "action": action
-                }, 200)
+                }
+                if calendar_note:
+                    response_data["calendar"] = calendar_note
+
+                self._send_json(response_data, 200)
             except Exception as e:
                 self._send_json({"error": f"Error processing response: {str(e)}"}, 500)
             finally:
