@@ -4,11 +4,13 @@ import os
 import re
 import secrets
 import smtplib
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
+
+from zoneinfo import ZoneInfo
 
 import mysql.connector
 
@@ -24,6 +26,8 @@ PUBLIC_DIR = BASE_DIR / "public"
 DB_DIR = BASE_DIR / "db"
 SCHEMA_PATH = DB_DIR / "schema.sql"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EST_ZONE = ZoneInfo("America/New_York")
+EST_TIMEZONE_LABEL = "EST"
 
 
 def _parse_bool(value, default=False):
@@ -96,6 +100,7 @@ Meeting: {meeting_payload['name']}
 Meeting ID: {meeting_payload['id']}
 Date: {meeting_payload['startsAt']}
 Time: {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload['timezone']})
+Microsoft Teams: {meeting_payload.get('teamsJoinUrl') or 'N/A'}
 Schedule: {meeting_payload['scheduleType']}
 Recurrence: {meeting_payload.get('recurrenceRule') or 'N/A'}
 Recurrence End: {meeting_payload.get('recurrenceEndDate') or 'N/A'}
@@ -245,6 +250,10 @@ Please click the appropriate link or button to respond to this meeting invitatio
                 <span class="detail-label">Time:</span> {meeting_payload['startTime']} - {meeting_payload['endTime']} ({meeting_payload['timezone']})
             </div>
             <div class="detail-row">
+                <span class="detail-label">Microsoft Teams:</span>
+                <a href="{meeting_payload.get('teamsJoinUrl') or '#'}" target="_blank" rel="noopener noreferrer">Join / Open in Teams</a>
+            </div>
+            <div class="detail-row">
                 <span class="detail-label">Schedule:</span> {meeting_payload['scheduleType']}
             </div>
             <div class="detail-row">
@@ -342,6 +351,42 @@ def initialize_db():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_schema_updates():
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'meeting_schedules'
+              AND COLUMN_NAME = 'teams_join_url'
+            """
+        )
+        exists = cursor.fetchone()[0] > 0
+        if not exists:
+            cursor.execute(
+                "ALTER TABLE meeting_schedules ADD COLUMN teams_join_url VARCHAR(2048) NULL"
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def build_teams_meeting_url(name, starts_at, start_time, end_time):
+    start_est = datetime.strptime(f"{starts_at} {start_time}", "%Y-%m-%d %H:%M").replace(tzinfo=EST_ZONE)
+    end_est = datetime.strptime(f"{starts_at} {end_time}", "%Y-%m-%d %H:%M").replace(tzinfo=EST_ZONE)
+
+    params = {
+        "subject": name,
+        "startTime": start_est.astimezone(dt_timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "endTime": end_est.astimezone(dt_timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "content": f"Meeting scheduled in {EST_TIMEZONE_LABEL}.",
+    }
+    return f"https://teams.microsoft.com/l/meeting/new?{urlencode(params)}"
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -498,6 +543,7 @@ class AppHandler(BaseHTTPRequestHandler):
                        ms.start_time AS startTime,
                        ms.end_time AS endTime,
                        ms.timezone,
+                       ms.teams_join_url AS teamsJoinUrl,
                        ms.schedule_type AS scheduleType,
                        ms.recurrence_rule AS recurrenceRule,
                        ms.recurrence_end_date AS recurrenceEndDate
@@ -508,6 +554,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 LEFT JOIN meeting_invites mi ON mi.meeting_id = me.id
                 LEFT JOIN meeting_invitee_responses mir ON mir.meeting_id = me.id
                 GROUP BY me.id, me.name, ms.starts_at, ms.start_time, ms.end_time, ms.timezone,
+                         ms.teams_join_url,
                          ms.schedule_type, ms.recurrence_rule, ms.recurrence_end_date
                 ORDER BY ms.starts_at DESC, ms.start_time DESC
             """
@@ -640,7 +687,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 starts_at = data.get("startsAt")
                 start_time = data.get("startTime")
                 end_time = data.get("endTime")
-                timezone = (data.get("timezone") or "UTC").strip()
+                timezone = EST_TIMEZONE_LABEL
                 schedule_type = data.get("scheduleType")
                 recurrence_rule = (data.get("recurrenceRule") or "").strip() or None
                 recurrence_end = data.get("recurrenceEndDate") or None
@@ -689,6 +736,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 if parsed_end_time <= parsed_start_time:
                     self._send_json({"error": "Meeting end time must be after start time."}, 400)
                     return
+                teams_join_url = build_teams_meeting_url(name, starts_at, start_time, end_time)
 
                 conn = get_db_connection()
                 try:
@@ -698,8 +746,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     cursor.execute(
                         """
                         INSERT INTO meeting_schedules
-                        (meeting_id, starts_at, start_time, end_time, timezone, schedule_type, recurrence_rule, recurrence_end_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        (meeting_id, starts_at, start_time, end_time, timezone, teams_join_url, schedule_type, recurrence_rule, recurrence_end_date)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             meeting_id,
@@ -707,6 +755,7 @@ class AppHandler(BaseHTTPRequestHandler):
                             start_time,
                             end_time,
                             timezone,
+                            teams_join_url,
                             schedule_type,
                             recurrence_rule if schedule_type == "recurring" else None,
                             recurrence_end if schedule_type == "recurring" else None,
@@ -747,6 +796,7 @@ class AppHandler(BaseHTTPRequestHandler):
                                 "startTime": start_time,
                                 "endTime": end_time,
                                 "timezone": timezone,
+                                "teamsJoinUrl": teams_join_url,
                                 "scheduleType": schedule_type,
                                 "recurrenceRule": recurrence_rule,
                                 "recurrenceEndDate": recurrence_end,
@@ -766,7 +816,12 @@ class AppHandler(BaseHTTPRequestHandler):
                     conn.commit()
                     
                     # Warn if email failed but meeting was created
-                    response = {"id": meeting_id, "name": name}
+                    response = {
+                        "id": meeting_id,
+                        "name": name,
+                        "timezone": timezone,
+                        "teamsJoinUrl": teams_join_url,
+                    }
                     if email_success:
                         response["email_status"] = "Invitation emails sent successfully"
                     elif email_error:
@@ -901,6 +956,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     initialize_db()
+    ensure_schema_updates()
     port = int(os.environ.get("PORT", "3000"))
     server = HTTPServer(("0.0.0.0", port), AppHandler)
     print(f"Server running at http://localhost:{port}")

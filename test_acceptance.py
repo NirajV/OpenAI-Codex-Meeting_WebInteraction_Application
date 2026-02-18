@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -28,9 +28,10 @@ def _server_available():
 
 
 def _create_meeting():
-    starts_at = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
+    now_utc = datetime.now(UTC)
+    starts_at = (now_utc.date() + timedelta(days=1)).isoformat()
     meeting_data = {
-        "name": f"Team Sync Meeting {datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+        "name": f"Team Sync Meeting {now_utc.strftime('%Y%m%d%H%M%S')}",
         "startsAt": starts_at,
         "startTime": "10:00",
         "endTime": "11:00",
@@ -40,6 +41,16 @@ def _create_meeting():
     }
     status, result = _request_json("POST", "/api/meetings", meeting_data)
     return status, result
+
+
+def _find_meeting(meeting_id):
+    status, meetings = _request_json("GET", "/api/meetings")
+    if status != 200:
+        return None
+    for meeting in meetings:
+        if meeting.get("id") == meeting_id:
+            return meeting
+    return None
 
 
 def _get_db_connection():
@@ -91,6 +102,16 @@ def test_create_meeting_with_invitees():
     assert status == 201
     assert "id" in result
     assert result.get("name")
+
+    meeting_view = result
+    if not result.get("timezone") or not result.get("teamsJoinUrl"):
+        meeting_view = _find_meeting(result["id"])
+
+    assert meeting_view
+    assert meeting_view.get("timezone") == "EST"
+    teams_join_url = meeting_view.get("teamsJoinUrl")
+    assert teams_join_url
+    assert teams_join_url.startswith("https://teams.microsoft.com/l/meeting/new?")
 
 
 def test_accept_invitation_records_response():

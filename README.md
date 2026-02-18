@@ -5,6 +5,8 @@ A lightweight web app to:
 2. Add members and map them to teams.
 3. Create one-time or recurring meetings and invite members.
 4. Persist all data in normalized MySQL tables.
+5. Generate Microsoft Teams meeting links automatically.
+6. Schedule and display meeting times in EST.
 
 ## Setup
 1. Install MySQL server and ensure it is running.

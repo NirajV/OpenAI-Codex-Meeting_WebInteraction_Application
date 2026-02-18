@@ -170,6 +170,7 @@ const renderMeetings = (meetings, nameFilter = '', patientFilter = '', mrnFilter
           `${meeting.startTime && meeting.endTime ? ` (${meeting.startTime} - ${meeting.endTime})` : ''} (${meeting.timezone})` +
           `${meeting.recurrenceRule ? ` | Rule: ${meeting.recurrenceRule}` : ''}` +
           `${meeting.recurrenceEndDate ? ` | Ends: ${meeting.recurrenceEndDate}` : ''}` +
+          `${meeting.teamsJoinUrl ? `<br/>Microsoft Teams: <a href="${meeting.teamsJoinUrl}" target="_blank" rel="noopener noreferrer">Join / Open Meeting</a>` : ''}` +
           `<br/>Attachments: ${meeting.attachmentCount || 0}${meeting.attachmentNames ? ` (${meeting.attachmentNames})` : ''}` +
           `<br/>Invitees: ${meeting.invitees || 'None'}` +
           `${responseHtml}` +
@@ -271,12 +272,17 @@ meetingForm.addEventListener('submit', async (event) => {
   }
 
   try {
+    const timezoneInput = document.getElementById('timezone');
+    if (timezoneInput) {
+      timezoneInput.value = 'EST';
+    }
+
     const payload = {
       name: document.getElementById('meetingName').value,
       startsAt: document.getElementById('startsAt').value,
       startTime: document.getElementById('startTime').value,
       endTime: document.getElementById('endTime').value,
-      timezone: document.getElementById('timezone').value,
+      timezone: 'EST',
       scheduleType: scheduleType.value,
       recurrenceRule: document.getElementById('recurrenceRule').value || null,
       recurrenceEndDate: document.getElementById('recurrenceEndDate').value || null,
